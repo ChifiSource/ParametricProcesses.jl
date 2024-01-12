@@ -7,6 +7,7 @@ abstract type Process end
 abstract type WorkerProcess <: Process end
 abstract type Threaded <: Process end
 abstract type AbstractJob end
+abstract type AbstractProcessManager end
 
 mutable struct ProcessJob <: AbstractJob
     f::Function
@@ -22,10 +23,11 @@ const new_job = ProcessJob
 mutable struct Worker{T <: Process} <: AbstractWorker
     name::String
     pid::Int64
+    ret::Any
     active::Bool
     task::Any
     Worker{T}(name::String, pid::Int64) where {T <: Process} = begin
-        new{T}(name, pid, false, nothing)
+        new{T}(name, pid, nothing, false, nothing)
     end
 end
 
@@ -35,29 +37,19 @@ function show(io::IO, worker::Worker{<:Any})
     T = typeof(worker).parameters[1]
     activemessage = "inactive"
     if worker.active
-        activemessage = "inactive"
+        activemessage = "active"
     end
     println("$(worker.pid) |$T process: $(worker.name) ($(activemessage))")
 end
 
-abstract type LoadDistributor end
-
-mutable struct BasicDistributor{N <: Real} <: LoadDistributor
-    value::N
-    NumericalDistributor(val::Number) = new{typeof(val)}(val)
-end
-
-mutable struct ProcessManager
+mutable struct ProcessManager <: AbstractProcessManager
     workers::Workers{<:Any}
-    f::Vector{Pair{LoadDistributor, Function}}
     function ProcessManager(workers::Worker{<:Any} ...)
-        fs = Vector{Pair{LoadDistributor, Function}}()
         workers::Vector{Worker} = [w for w in workers]
-        new(workers, fs)
+        new(workers)
     end
     function ProcessManager(workers::Vector{<:AbstractWorker})
-        fs = Vector{Pair{LoadDistributor, Function}}()
-        new(workers, fs)
+        new(workers)
     end
 end
 
@@ -131,19 +123,81 @@ function processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     ProcessManager(workers)
 end
 
-function assign!(f::Function, pm::ProcessManager, pid::Int64, job::AbstractJob)
-    assigned_task = remotecall(job.f, pid, job.args ...; job.kwargs ...)
-    assigned_worker = pm[pid]
-    assigned_worker.active = true
+
+function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
+    if ~(assigned_worker.active)
+        assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
+        assigned_worker.task = assigned_task
+        assigned_worker.active = true
+        @async begin
+            wait(assigned_task)
+            assigned_worker.active = false
+            assigned_worker.ret = fetch(assigned_task)
+        end
+        return assigned_worker::Worker{Threaded}
+    end
     @async begin
-        wait(assigned_task)
-        f(fetch(assigned_task))
-        assigned_worker.active = false
+        wait(assigned_worker.task)
+        sleep(1)
+        assign!(assigned_worker, job)
     end
 end
 
-function distribute!(pm::ProcessManager, job::AbstractJob ...)
+function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJob)
+    if ~(assigned_worker.active)
+        assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
+        assigned_worker.task = assigned_task
+        assigned_worker.active = true
+        @async begin
+            wait(assigned_task)
+            f(fetch(assigned_task) ...)
+            assigned_worker.active = false
+        end
+        return assigned_worker::Worker{Threaded}
+    end
+    @async begin
+        wait(assigned_worker.task)
+        sleep(1)
+        assign!(f, assigned_worker, job)
+    end
+end
 
+function assign!(f::Function, pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
+   [assign!(f, pm[pid], job) for job in jobs]::Vector{AbstractWorker}
+end
+
+
+function waitfor(pm::ProcessManager, pids::Any ...)
+    workers = [pm[pid] for pid in pids]
+    while true
+        next = findfirst(w -> w.active == true, workers)
+        if isnothing(next)
+            break
+        end
+        wait(workers[next].task)
+    end
+    return
+end
+
+function get_return!(pm::ProcessManager, pids::Any ...)
+    [pm[pid].ret for pid in pids]
+end
+
+function distribute!(pm::ProcessManager, jobs::AbstractJob ...)
+    jobs = [job for job in jobs]
+    n_jobs = length(jobs)
+    open = filter(w::AbstractWorker -> ~(w.active), pm.workers)
+    at = 1
+    n_open = length(open)
+    while n_jobs > 0
+        jb = assign!(open[at], jobs[n_jobs])
+        at += 1
+        if at > n_open
+            at = 1
+        end
+        deleteat!(jobs, n_jobs)
+        n_jobs = length(jobs)
+    end
 end
 
 function distribute!(pm::ProcessManager, jobs::Pair{Float64, <:AbstractJob} ...)
@@ -151,6 +205,6 @@ function distribute!(pm::ProcessManager, jobs::Pair{Float64, <:AbstractJob} ...)
 end
 
 export processes, add_workers!, assign!, distribute!, Worker, ProcessManager
-export Threaded
+export Threaded, new_job
 
 end # module BasicProcesses
