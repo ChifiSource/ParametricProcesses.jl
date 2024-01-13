@@ -6,6 +6,7 @@ abstract type AbstractWorker end
 abstract type Process end
 abstract type WorkerProcess <: Process end
 abstract type Threaded <: Process end
+abstract type Async <: Process end
 abstract type AbstractJob end
 abstract type AbstractProcessManager end
 
@@ -83,6 +84,7 @@ end
 
 function add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     workers = Vector{Worker{<:Any}}()
+    name_n = length(names)
     if name_n == 0
         workers = create_workers(n, of)
     elseif name_n != n
@@ -123,7 +125,6 @@ function processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     ProcessManager(workers)
 end
 
-
 function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
     if ~(assigned_worker.active)
         assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
@@ -134,13 +135,14 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
             assigned_worker.active = false
             assigned_worker.ret = fetch(assigned_task)
         end
-        return assigned_worker::Worker{Threaded}
+        return assigned_worker.pid
     end
     @async begin
         wait(assigned_worker.task)
         sleep(1)
         assign!(assigned_worker, job)
     end
+    assigned_worker.pid
 end
 
 function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJob)
@@ -149,23 +151,26 @@ function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJo
         assigned_worker.task = assigned_task
         assigned_worker.active = true
         @async begin
-            wait(assigned_task)
-            f(fetch(assigned_task) ...)
+            wait(worker.assigned_task)
             assigned_worker.active = false
         end
-        return assigned_worker::Worker{Threaded}
+        return assigned_worker.pid
     end
     @async begin
         wait(assigned_worker.task)
         sleep(1)
         assign!(f, assigned_worker, job)
     end
+    assigned_worker.pid
 end
 
 function assign!(f::Function, pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
-   [assign!(f, pm[pid], job) for job in jobs]::Vector{AbstractWorker}
+   [assign!(f, pm[pid], job) for job in jobs]::Vector{Int64}
 end
 
+function assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
+    [assign!(pm[pid], job) for job in jobs]::Vector{Int64}
+ end
 
 function waitfor(pm::ProcessManager, pids::Any ...)
     workers = [pm[pid] for pid in pids]
@@ -176,11 +181,18 @@ function waitfor(pm::ProcessManager, pids::Any ...)
         end
         wait(workers[next].task)
     end
-    return
+    [pm[pid].ret for pid in pids]
 end
 
 function get_return!(pm::ProcessManager, pids::Any ...)
     [pm[pid].ret for pid in pids]
+end
+
+function use_with!(pm::ProcessManager, pid::Any, mod::String)
+    imprtjob = new_job() do 
+        eval(Meta.parse("using $(name)"))
+    end
+    assign!(pm.workers[pid], imprtjob)
 end
 
 function distribute!(pm::ProcessManager, jobs::AbstractJob ...)
@@ -198,6 +210,7 @@ function distribute!(pm::ProcessManager, jobs::AbstractJob ...)
         deleteat!(jobs, n_jobs)
         n_jobs = length(jobs)
     end
+    [w.pid for w in open]
 end
 
 function distribute!(pm::ProcessManager, jobs::Pair{Float64, <:AbstractJob} ...)
@@ -205,6 +218,6 @@ function distribute!(pm::ProcessManager, jobs::Pair{Float64, <:AbstractJob} ...)
 end
 
 export processes, add_workers!, assign!, distribute!, Worker, ProcessManager
-export Threaded, new_job
+export Threaded, new_job, @everywhere, get_return!, waitfor, use_with!, Async
 
 end # module BasicProcesses
