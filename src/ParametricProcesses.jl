@@ -46,7 +46,7 @@ end
 mutable struct ProcessManager <: AbstractProcessManager
     workers::Workers{<:Any}
     function ProcessManager(workers::Worker{<:Any} ...)
-        workers::Vector{Worker} = [w for w in workers]
+        workers::Vector{Worker} = Vector{Worker{<:Any}}([w for w in workers])
         new(workers)
     end
     function ProcessManager(workers::Vector{<:AbstractWorker})
@@ -54,11 +54,9 @@ mutable struct ProcessManager <: AbstractProcessManager
     end
 end
 
-function show(io::IO, pm::ProcessManager)
-    println("pid | process type | name | active")
-    [show(io, worker) for worker in pm.workers]
+function show(io::IO, pm::AbstractProcessManager)
+    [show(worker) for worker in pm.workers]
 end
-
 
 function getindex(pm::ProcessManager, name::String)
     pos = findfirst(worker::Worker{<:Any} -> worker.name == name, pm.workers)
@@ -79,7 +77,7 @@ end
 function create_workers(n::Int64, of::Type{Threaded}, 
     names::Vector{String} = ["$e" for e in 1:n])
     pids = addprocs(n)
-    [Worker{of}(names[e], pid) for (e, pid) in enumerate(pids)]
+    Vector{Worker{<:Any}}([Worker{of}(names[e], pid) for (e, pid) in enumerate(pids)])
 end
 
 function add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)
@@ -110,7 +108,6 @@ function delete!(pm::ProcessManager, name::String)
     end
     deleteat!(pm.workers, pos)
 end
-
 
 function processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     workers = Vector{Worker{<:Any}}()
@@ -172,6 +169,8 @@ function assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
     [assign!(pm[pid], job) for job in jobs]::Vector{Int64}
  end
 
+worker_pids(pm::ProcessManager) = [w.pid for w in pm.workers]
+
 function waitfor(pm::ProcessManager, pids::Any ...)
     workers = [pm[pid] for pid in pids]
     while true
@@ -213,11 +212,55 @@ function distribute!(pm::ProcessManager, jobs::AbstractJob ...)
     [w.pid for w in open]
 end
 
-function distribute!(pm::ProcessManager, jobs::Pair{Float64, <:AbstractJob} ...)
-
+function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...)
+    num_workers = length(worker_pids)
+    
+    if num_workers == 0
+        error("No worker PIDs provided for distribution.")
+    end
+    
+    for job in jobs
+        if isempty(worker_pids)
+            error("Not enough worker PIDs to distribute all the jobs.")
+        end
+        pid = popfirst!(worker_pids)
+        worker = pm[pid]
+        assign!(worker, job)
+    end
+    
+    return worker_pids
 end
 
-export processes, add_workers!, assign!, distribute!, Worker, ProcessManager
+function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...)
+    total_workers = length(pm.workers)
+    num_workers_to_use = round(Int, percentage * total_workers)
+    
+    open = filter(w -> ~w.active, pm.workers)
+    num_open = length(open)
+    
+    if num_open < num_workers_to_use
+        # If there aren't enough open workers, assign jobs asynchronously
+        async_workers = filter(w -> w.active, pm.workers)
+        for job in jobs
+            if isempty(async_workers)
+                error("Not enough open and active workers to distribute the jobs.")
+            end
+            worker = popfirst!(async_workers)
+            assign!(worker, job)
+        end
+        return [w.pid for w in async_workers]
+    end
+    
+    # Assign jobs to open workers
+    for job in jobs
+        worker = popfirst!(open)
+        assign!(worker, job)
+    end
+    
+    return [w.pid for w in open]
+end
+
+export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids
 export Threaded, new_job, @everywhere, get_return!, waitfor, use_with!, Async
 
 end # module BasicProcesses
