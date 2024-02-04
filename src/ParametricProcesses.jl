@@ -36,14 +36,93 @@ module ParametricProcesses
 import Base: show, getindex, push!, delete!
 using Distributed
 
+"""
+### abstract type AbstractWorker
+The `AbstractWorker` is a worker that holds  a parametric `Process` type, 
+an identifier, and finally task information such as whether the task is active or not.
+
+- See also: `Worker`, `processes`, `assign!`, `new_job`, `ProcessManager`
+##### consistencies
+- pid**::Int64**
+- active**::Bool**
+"""
 abstract type AbstractWorker end
+
+"""
+### abstract type Process
+A `Process` is a type only by name, and is used to denote the type of a `Worker`.
+
+- See also: `Worker`, `processes`, `Async`, `Threaded`
+##### consistencies
+- pid**::Int64**
+- active**::Bool**
+"""
 abstract type Process end
+
+"""
+### abstract type WorkerProcess
+A `Process` is a type only by name, and is used to denote the type of a `Worker`.
+
+- See also: `Worker`, `processes`, `new_job`, `Async`, `Threaded`
+##### consistencies
+- pid**::Int64**
+- active**::Bool**
+"""
 abstract type WorkerProcess <: Process end
+
+"""
+### abstract type Threaded
+A `Process` is a type only by name, and is used to denote the type of a `Worker`. `Threaded` is 
+used to denote a worker on its own thread, a `Worker` of type `Worker{Threaded}`.
+
+- See also: `Worker`, `processes`, `new_job`, `Async`, `Threaded`
+##### consistencies
+- pid**::Int64**
+- active**::Bool**
+"""
 abstract type Threaded <: Process end
+
+"""
+### abstract type Async
+A `Process` is a type only by name, and is used to denote the type of a `Worker`. `Async` workers run 
+on the same thread, able to run tasks on that thread only when it is required to run that task.
+
+- See also: `Worker`, `processes`, `new_job`, `Threaded`
+##### consistencies
+- pid**::Int64**
+- active**::Bool**
+"""
 abstract type Async <: Process end
 abstract type AbstractJob end
 abstract type AbstractProcessManager end
 
+"""
+```julia
+ProcessJob <: AbstractJob
+```
+- f**::Function**
+- args
+- kwargs
+
+The `ProcessJob` is the default `ParametericProcess` job type. This constructor is also defined as `new_job`. Provide a `Function` and 
+the arguments for the `Function` to `new_job` (or this constructor), and then provide jobs to a process manager with `assign!` or `distribute!`.
+
+- See also: Worker, processes, ProcessManager, assign!
+```julia
+- ProcessJob(f::Function, args ...; keyargs ...)
+```
+---
+```example
+# note this is `julia --threads >2`
+newprocs = processes(3)
+io = IOBuffer()
+new_job = (io) do o
+    write(o, "hello world!)
+end
+
+assign!(newprocs, 2, [new_job for e in 1:50] ...)
+```
+"""
 mutable struct ProcessJob <: AbstractJob
     f::Function
     args
@@ -55,6 +134,37 @@ end
 
 const new_job = ProcessJob
 
+"""
+```julia
+Worker{T <: Process} <: AbstractWorker
+```
+- name**::String**
+- pid**::String**
+- ret**::Any**
+- active**::Bool**
+- task**::Any**
+
+A `Worker` performs and tracks the progress of `AbstractJob`s. Workers may be created directly 
+by providing a name and process identifier, or workers can be created using the `processes` `Function`.
+
+- See also: assign!, distribute!, waitfor, add_workers!, get_return!, processes, ProcessManager
+```julia
+- Worker{T}(name::String, pid::Int64)
+```
+---
+```example
+newworker = Worker{Async}("example", 500)
+
+jb = new_job() do
+    println("hello from worker 500!")
+end
+
+pm = processes(3) # <- these are threads, but we will use `newworker`
+
+push!(pm, newworker) # add our new worker.
+assign!(pm, 500, jb)
+```
+"""
 mutable struct Worker{T <: Process} <: AbstractWorker
     name::String
     pid::Int64
