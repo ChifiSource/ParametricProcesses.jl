@@ -187,6 +187,25 @@ function show(io::IO, worker::Worker{<:Any})
     println("$(worker.pid) |$T process: $(worker.name) ($(activemessage))")
 end
 
+"""
+```julia
+ProcessManager <: AbstractProcessManager
+```
+- workers**::Workers{<:Any}**
+
+The `ProcessManager` is a wrapper for a `Vector{Worker{<:Any}}` (or `Workers{<:Any}`) 
+that provides PID indexing and a process management API.
+
+- See also: assign!, distribute!, waitfor, add_workers!, get_return!, processes, Worker, use_with!, put!
+```julia
+- ProcessManager(workers::Worker{<:Any} ...)
+- ProcessManager(workers::Vector{<:AbstractWorker})
+```
+---
+```example
+
+```
+"""
 mutable struct ProcessManager <: AbstractProcessManager
     workers::Workers{<:Any}
     function ProcessManager(workers::Worker{<:Any} ...)
@@ -218,12 +237,43 @@ function getindex(pm::ProcessManager, pid::Int64)
     pm.workers[pos]
 end
 
+"""
+```julia
+create_workers(n::Int64, of::Type{Threaded}, names::Vector{String} = ...) -> ::Workers
+````
+This function is used to create new workers with the process type `of`. 
+    New workers will be named with `names`. Not passing a name will name workers 
+    by PID.
+```julia
+create_workers(n::Int64, of::Type{Async})
+create_workers(n::Int64, of::Type{Async})
+```
+---
+```example
+workers = create_workers(3, ParametricProcesses.Async)
+```
+"""
+function create_workers end
+
 function create_workers(n::Int64, of::Type{Threaded}, 
     names::Vector{String} = ["$e" for e in 1:n])
     pids = addprocs(n)
     Vector{Worker{<:Any}}([Worker{of}(names[e], pid) for (e, pid) in enumerate(pids)])
 end
 
+function create_workers(n::Int64, of::Type{Async}, names::Vector{String} = ["$e" for e in 1:n])
+
+end
+"""
+```julia
+add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)
+````
+
+---
+```example
+
+```
+"""
 function add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     workers = Vector{Worker{<:Any}}()
     name_n = length(names)
@@ -253,6 +303,15 @@ function delete!(pm::ProcessManager, name::String)
     deleteat!(pm.workers, pos)
 end
 
+"""
+```julia
+processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...) -> ::ProcessManager
+```
+---
+```example
+
+```
+"""
 function processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     workers = Vector{Worker{<:Any}}()
     name_n = length(names)
@@ -265,6 +324,50 @@ function processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     end
     ProcessManager(workers)
 end
+
+worker_pids(pm::ProcessManager) = [w.pid for w in pm.workers]
+
+function waitfor(pm::ProcessManager, pids::Any ...)
+    workers = [pm[pid] for pid in pids]
+    while true
+        next = findfirst(w -> w.active == true, workers)
+        if isnothing(next)
+            break
+        end
+        wait(workers[next].task)
+    end
+    [pm[pid].ret for pid in pids]
+end
+
+function get_return!(pm::ProcessManager, pids::Any ...)
+    [pm[pid].ret for pid in pids]
+end
+
+function use_with!(pm::ProcessManager, pid::Any, mod::String)
+    imprtjob = new_job() do 
+        eval(Meta.parse("using $(name)"))
+    end
+    assign!(pm.workers[pid], imprtjob)
+end
+
+"""
+```julia
+assign!
+```
+`assign!` is used to distribute tasks to workers directly. This 
+culminates in two forms; `assign!` is used to assign a worker directly to 
+its job using its process type and it is also used to `assign!` a process 
+manager's workers to jobs.
+```julia
+assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
+assign!(f::Function, assigned_worker::Worker{:Threaded}, job::AbstractJob)
+```
+---
+```example
+
+```
+"""
+function assign! end
 
 function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
     if ~(assigned_worker.active)
@@ -312,31 +415,6 @@ end
 function assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
     [assign!(pm[pid], job) for job in jobs]::Vector{Int64}
  end
-
-worker_pids(pm::ProcessManager) = [w.pid for w in pm.workers]
-
-function waitfor(pm::ProcessManager, pids::Any ...)
-    workers = [pm[pid] for pid in pids]
-    while true
-        next = findfirst(w -> w.active == true, workers)
-        if isnothing(next)
-            break
-        end
-        wait(workers[next].task)
-    end
-    [pm[pid].ret for pid in pids]
-end
-
-function get_return!(pm::ProcessManager, pids::Any ...)
-    [pm[pid].ret for pid in pids]
-end
-
-function use_with!(pm::ProcessManager, pid::Any, mod::String)
-    imprtjob = new_job() do 
-        eval(Meta.parse("using $(name)"))
-    end
-    assign!(pm.workers[pid], imprtjob)
-end
 
 function distribute!(pm::ProcessManager, jobs::AbstractJob ...)
     jobs = [job for job in jobs]
