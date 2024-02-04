@@ -1,3 +1,37 @@
+"""
+#### ParametricProcesses -- versatile process managers for julia
+Created in February, 2023 by
+[chifi - an open source software dynasty.](https://github.com/orgs/ChifiSource)
+- This software is MIT-licensed.
+
+`ParametricProcesses` provides a high-level parametric worker interface for managing different types of parallel computing 
+platforms. The results are process tracking and load/worker distribution for multi-threaded and asynchronous use-cases.
+With extensions, this management framework could be used further with other forms of parallel computing.
+---
+###### contents
+ - AbstractWorker
+ - Process
+ - WorkerProcess
+ - Threaded
+ - Async
+ - AbstractJob
+ - AbstractProcessManager
+ - ProcessJob
+ - new_job
+ - Worker{T <: Process}
+ - Workers{T}
+ - ProcessManager
+ - create_workers
+ - add_workers!
+ - delete!(pm::ProcessManager, name::String)
+ - delete!(pm::ProcessManager, pid::Int64)
+ - processes
+ - assign!
+ - distribute!
+ - waitfor
+ - get_return
+ - worker_pids
+"""
 module ParametricProcesses
 import Base: show, getindex, push!, delete!
 using Distributed
@@ -200,34 +234,14 @@ function distribute!(pm::ProcessManager, jobs::AbstractJob ...)
     open = filter(w::AbstractWorker -> ~(w.active), pm.workers)
     at = 1
     n_open = length(open)
-    while n_jobs > 0
-        jb = assign!(open[at], jobs[n_jobs])
-        at += 1
-        if at > n_open
-            at = 1
-        end
-        deleteat!(jobs, n_jobs)
-        n_jobs = length(jobs)
-    end
+    [begin
+        assign!(worker, job)
+    end for job in jobs]
     [w.pid for w in open]
 end
 
 function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...)
-    num_workers = length(worker_pids)
-    
-    if num_workers == 0
-        error("No worker PIDs provided for distribution.")
-    end
-    
-    for job in jobs
-        if isempty(worker_pids)
-            error("Not enough worker PIDs to distribute all the jobs.")
-        end
-        pid = popfirst!(worker_pids)
-        worker = pm[pid]
-        assign!(worker, job)
-    end
-    
+    workers = [pm.workers[id] for id in worker_pids]
     return worker_pids
 end
 
@@ -250,17 +264,15 @@ function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob 
         end
         return [w.pid for w in async_workers]
     end
-    
     # Assign jobs to open workers
     for job in jobs
         worker = popfirst!(open)
         assign!(worker, job)
     end
-    
     return [w.pid for w in open]
 end
 
 export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids
-export Threaded, new_job, @everywhere, get_return!, waitfor, use_with!, Async
+export Threaded, new_job, @everywhere, get_return!, waitfor, use_with!, Async, RemoteChannel
 
 end # module BasicProcesses
