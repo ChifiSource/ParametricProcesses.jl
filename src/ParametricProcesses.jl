@@ -9,30 +9,30 @@ platforms. The results are process tracking and load/worker distribution for mul
 With extensions, this management framework could be used further with other forms of parallel computing.
 ---
 ###### contents
- - AbstractWorker
- - Process
- - WorkerProcess
- - Threaded
- - Async
- - AbstractJob
- - AbstractProcessManager
- - ProcessJob
- - new_job
- - Worker{T <: Process}
- - Workers{T}
- - ProcessManager
- - delete!(pm::ProcessManager, name::String)
- - delete!(pm::ProcessManager, pid::Int64)
- - push!(pm::ProcessManager, w::Worker{<:Any})
- - put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)
- - create_workers
- - add_workers!
- - processes
- - assign!
- - distribute!
- - waitfor
- - get_return
- - worker_pids
+ - `AbstractWorker`
+ - `Process`
+ - `WorkerProcess`
+ - `Threaded`
+ - `Async`
+ - `AbstractJob`
+ - `AbstractProcessManager`
+ - `ProcessJob`
+ - `new_job`
+ - `Worker{T <: Process}`
+ - `Workers{T}`
+ - `ProcessManager`
+ - `delete!(pm::ProcessManager, name::String)`
+ - `delete!(pm::ProcessManager, pid::Int64)`
+ - `push!(pm::ProcessManager, w::Worker{<:Any})`
+ - `put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)`
+ - `create_workers`
+ - `add_workers!`
+ - `processes`
+ - `assign!`
+ - `distribute!`
+ - `waitfor`
+ - `get_return`
+ - `worker_pids`
 """
 module ParametricProcesses
 import Base: show, getindex, push!, delete!, put!, take!
@@ -109,7 +109,7 @@ ProcessJob <: AbstractJob
 The `ProcessJob` is the default `ParametericProcess` job type. This constructor is also defined as `new_job`. Provide a `Function` and 
 the arguments for the `Function` to `new_job` (or this constructor), and then provide jobs to a process manager with `assign!` or `distribute!`.
 
-- See also: Worker, processes, ProcessManager, assign!
+- See also: `Worker`, `processes`, `ProcessManager`, `assign!`
 ```julia
 - ProcessJob(f::Function, args ...; keyargs ...)
 ```
@@ -203,7 +203,8 @@ ProcessManager <: AbstractProcessManager
 - workers**::Workers{<:Any}**
 
 The `ProcessManager` is a wrapper for a `Vector{Worker{<:Any}}` (or `Workers{<:Any}`) 
-that provides PID/name indexing and a process management API. Process management revolves 
+that provides PID/name indexing and a process management API. This type may be indexed with a `String` to 
+retrieve workers by name and an `In64` to get workers by process id (`pid`)Process management revolves 
 primarily around the following methods:
 - `delete!(pm::ProcessManager, identifier)`
 - `add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)`
@@ -229,7 +230,22 @@ asyncprocs = processes(2, Async, "first", "second")
 ```
 ---
 ```example
+# threaded workers
+pm = processes(2)
+# asynchronous worker.
+pm2 = ProcessManager(Worker{Async}("my worker", 50))
 
+job = new_job() do
+    println("hello")
+    sleep(10)
+    println("world")
+end
+
+assign!(pm2, 50, job)
+
+assign!(pm, 2, job)
+
+distribute!(pm, job, job, job, job, job, job)
 ```
 """
 mutable struct ProcessManager <: AbstractProcessManager
@@ -247,7 +263,7 @@ function show(io::IO, pm::AbstractProcessManager)
     [show(worker) for worker in pm.workers]
 end
 
-function getindex(pm::ProcessManager, name::String)
+function getindex(pm::AbstractProcessManager, name::String)
     pos = findfirst(worker::Worker{<:Any} -> worker.name == name, pm.workers)
     if isnothing(pos)
         # throw
@@ -537,7 +553,6 @@ the provided workers.
 distribute!(pm::ProcessManager, jobs::AbstractJob ...)
 # distribute only to certain workers:
 distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...)
-
 # distribute a percentage of workers:
 distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...)
 ```
