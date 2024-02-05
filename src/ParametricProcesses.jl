@@ -208,10 +208,11 @@ primarily around the following methods:
 Though this constructor is meant to be used directly to create processes from scratch, high-level usage is 
 simplified through the `processes` `Function`, which will provide us with initialized workers. 
 ```julia
-
+processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
 ```
 ```example
-
+myprocs = processes(5)
+asyncprocs = processes(2, Async, "first", "second")
 ```
 `processes` simply calls `create_workers` with the provided `of` and then a `ProcessManager` constructor.
 - See also: assign!, distribute!, waitfor, add_workers!, get_return!, processes, Worker, use_with!, put!
@@ -337,7 +338,12 @@ processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...) -> ::Proc
 Creates `Workers` inside of a `ProcessManager` with the `Process` type `of`.
 ---
 ```example
-
+myprocs = processes(5)
+2 |Threaded process: 1 (inactive)
+3 |Threaded process: 2 (inactive)
+4 |Threaded process: 3 (inactive)
+5 |Threaded process: 4 (inactive)
+6 |Threaded process: 5 (inactive)
 ```
 """
 function processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
@@ -353,8 +359,46 @@ function processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     ProcessManager(workers)
 end
 
+"""
+```julia
+worker_pids(pm::ProcessManager) -> ::Vector{Int64}
+```
+Gives the pid of each `Worker` in a `ProcessManager`'s `Workers` in the 
+form of a `Vector{Int64}`.
+---
+```example
+pm = processes(3)
+
+worker_pids(pm)
+[2, 3, 4]
+```
+"""
 worker_pids(pm::ProcessManager) = [w.pid for w in pm.workers]
 
+"""
+```julia
+waitfor(pm::ProcessManager, pids::Any ...) -> ::Vector{Any}
+```
+Stalls the main thread process to wait for all pids provided to `pids`. 
+Will return a `Vector{Any}` containing the completed returns for each `Worker`.
+---
+```example
+pm = processes(4)
+
+jb = new_job() do 
+    sleep(10)
+    @info "hello world!"
+    return 55
+end
+
+assign!(pm, 2, jb)
+
+ret = waitfor(pm, 2); println("worker 2 completed, it returned: ", ret[1])
+
+# From worker 2:	[ Info: hello world!
+# worker 2 completed, it returned: 55
+```
+"""
 function waitfor(pm::ProcessManager, pids::Any ...)
     workers = [pm[pid] for pid in pids]
     while true
@@ -367,17 +411,31 @@ function waitfor(pm::ProcessManager, pids::Any ...)
     [pm[pid].ret for pid in pids]
 end
 
+"""
+```julia
+get_return!(pm::ProcessManager, pids::Any ...) -> ::Vector{<:Any}
+```
+Gets the return of all the workers with the pids of `pids` from `pm`, the `ProcessManager`.
+
+---
+```example
+
+```
+"""
 function get_return!(pm::ProcessManager, pids::Any ...)
     [pm[pid].ret for pid in pids]
 end
 
-function use_with!(pm::ProcessManager, pid::Any, mod::String)
-    imprtjob = new_job() do 
-        eval(Meta.parse("using $(name)"))
-    end
-    assign!(pm.workers[pid], imprtjob)
-end
+"""
+```julia
+put!(pm::ProcessManager, pids::Vector{Int64}, vals ...) -> ::Nothing
+```
+Puts different objects directly into a `Worker`, defines them on that thread's `Main`.
+---
+```example
 
+```
+"""
 function put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)
 
 end
@@ -391,9 +449,16 @@ culminates in two forms; `assign!` is used to assign a worker directly to
 its job using its process type and it is also used to `assign!` a process 
 manager's workers to jobs.
 ```julia
+# used to assign workers directly:
 assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
 assign!(f::Function, assigned_worker::Worker{:Threaded}, job::AbstractJob)
+# used to assign via a `ProcessManager`:
+   #   vvv does `f` on completion of `jobs`.
+assign!(f::Function, pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
+
+assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
 ```
+- See also: `processes`, `distribute!`, `waitfor`, `put!`
 ---
 ```example
 
@@ -441,12 +506,14 @@ function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJo
 end
 
 function assign!(f::Function, pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
-   [assign!(f, pm[pid], job) for job in jobs]::Vector{Int64}
+   [assign!(f, pm[pid], job) for job in jobs]
 end
 
 function assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
-    [assign!(pm[pid], job) for job in jobs]::Vector{Int64}
+    [assign!(pm[pid], job) for job in jobs]
  end
+
+function distribute! end
 
 function distribute!(pm::ProcessManager, jobs::AbstractJob ...)
     jobs = [job for job in jobs]
