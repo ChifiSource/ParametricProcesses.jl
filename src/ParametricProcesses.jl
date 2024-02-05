@@ -21,10 +21,12 @@ With extensions, this management framework could be used further with other form
  - Worker{T <: Process}
  - Workers{T}
  - ProcessManager
- - create_workers
- - add_workers!
  - delete!(pm::ProcessManager, name::String)
  - delete!(pm::ProcessManager, pid::Int64)
+ - push!(pm::ProcessManager, w::Worker{<:Any})
+ - put!(pm::ProcessManager)
+ - create_workers
+ - add_workers!
  - processes
  - assign!
  - distribute!
@@ -33,7 +35,7 @@ With extensions, this management framework could be used further with other form
  - worker_pids
 """
 module ParametricProcesses
-import Base: show, getindex, push!, delete!
+import Base: show, getindex, push!, delete!, put!
 using Distributed
 
 """
@@ -194,8 +196,24 @@ ProcessManager <: AbstractProcessManager
 - workers**::Workers{<:Any}**
 
 The `ProcessManager` is a wrapper for a `Vector{Worker{<:Any}}` (or `Workers{<:Any}`) 
-that provides PID indexing and a process management API.
+that provides PID/name indexing and a process management API. Process management revolves 
+primarily around the following methods:
+- `delete!(pm::ProcessManager, identifier)`
+- `add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)`
+- `processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)`
+- `worker_pids(pm::ProcessManager)`
+- `waitfor(pm::ProcessManager, pids::Any ...)`
+- `get_return!(pm::ProcessManager, pids::Any ...)`
 
+Though this constructor is meant to be used directly to create processes from scratch, high-level usage is 
+simplified through the `processes` `Function`, which will provide us with initialized workers. 
+```julia
+
+```
+```example
+
+```
+`processes` simply calls `create_workers` with the provided `of` and then a `ProcessManager` constructor.
 - See also: assign!, distribute!, waitfor, add_workers!, get_return!, processes, Worker, use_with!, put!
 ```julia
 - ProcessManager(workers::Worker{<:Any} ...)
@@ -237,12 +255,30 @@ function getindex(pm::ProcessManager, pid::Int64)
     pm.workers[pos]
 end
 
+function delete!(pm::ProcessManager, pid::Int64)
+    pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
+    if isnothing(pos)
+        # throw
+    end
+    deleteat!(pm.workers, pos)
+end
+
+push!(pm::ProcessManager, w::Worker{<:Any}) = push!(pm.workers, w)
+
+function delete!(pm::ProcessManager, name::String)
+    pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
+    if isnothing(pos)
+        # throw
+    end
+    deleteat!(pm.workers, pos)
+end
+
 """
 ```julia
 create_workers(n::Int64, of::Type{Threaded}, names::Vector{String} = ...) -> ::Workers
 ````
 This function is used to create new workers with the process type `of`. 
-    New workers will be named with `names`. Not passing a name will name workers 
+    New workers will be named with `names`. Not passing names for each worker will name workers 
     by PID.
 ```julia
 create_workers(n::Int64, of::Type{Async})
@@ -264,14 +300,21 @@ end
 function create_workers(n::Int64, of::Type{Async}, names::Vector{String} = ["$e" for e in 1:n])
 
 end
+
 """
 ```julia
 add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)
 ````
-
+Add workers adds workers to a `ProcessManager`. 
+The `ProcessManager` can be created with or without workers. `add_workers!` is a 
+quick way to add `Workers` of any `Process` type to an existing aggregation of 
+`Workers`.
 ---
 ```example
-
+pm = processes(2)
+# 2 workers, three total processes (including `Main`)
+add_workers!(pm, 2)
+# now 4 workers, process id's 2-6
 ```
 """
 function add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)
@@ -287,26 +330,11 @@ function add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Thread
     pm.workers = vcat(pm.workers, workers)
 end
 
-function delete!(pm::ProcessManager, pid::Int64)
-    pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
-    if isnothing(pos)
-        # throw
-    end
-    deleteat!(pm.workers, pos)
-end
-
-function delete!(pm::ProcessManager, name::String)
-    pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
-    if isnothing(pos)
-        # throw
-    end
-    deleteat!(pm.workers, pos)
-end
-
 """
 ```julia
 processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...) -> ::ProcessManager
 ```
+Creates `Workers` inside of a `ProcessManager` with the `Process` type `of`.
 ---
 ```example
 
@@ -348,6 +376,10 @@ function use_with!(pm::ProcessManager, pid::Any, mod::String)
         eval(Meta.parse("using $(name)"))
     end
     assign!(pm.workers[pid], imprtjob)
+end
+
+function put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)
+
 end
 
 """
