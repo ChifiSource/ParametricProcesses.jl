@@ -24,7 +24,7 @@ With extensions, this management framework could be used further with other form
  - delete!(pm::ProcessManager, name::String)
  - delete!(pm::ProcessManager, pid::Int64)
  - push!(pm::ProcessManager, w::Worker{<:Any})
- - put!(pm::ProcessManager)
+ - put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)
  - create_workers
  - add_workers!
  - processes
@@ -35,7 +35,7 @@ With extensions, this management framework could be used further with other form
  - worker_pids
 """
 module ParametricProcesses
-import Base: show, getindex, push!, delete!, put!
+import Base: show, getindex, push!, delete!, put!, take!
 using Distributed
 
 """
@@ -178,6 +178,13 @@ mutable struct Worker{T <: Process} <: AbstractWorker
     end
 end
 
+"""
+```julia
+Workers{T} (Alias for Vector{T} where {T <: AbstractWorker})
+```
+`Workers` represents an allocation of workers, typically of a certain type. 
+For `Workers` multiple types, use `Workers{<:Process}` or `Workers{<:Any}`.
+"""
 const Workers{T} = Vector{T} where {T <: AbstractWorker}
 
 function show(io::IO, worker::Worker{<:Any})
@@ -261,6 +268,7 @@ function delete!(pm::ProcessManager, pid::Int64)
     if isnothing(pos)
         # throw
     end
+    rmprocs(pid)
     deleteat!(pm.workers, pos)
 end
 
@@ -271,6 +279,7 @@ function delete!(pm::ProcessManager, name::String)
     if isnothing(pos)
         # throw
     end
+    rmprocs(pm.workers[pos].pid)
     deleteat!(pm.workers, pos)
 end
 
@@ -294,7 +303,7 @@ function create_workers end
 
 function create_workers(n::Int64, of::Type{Threaded}, 
     names::Vector{String} = ["$e" for e in 1:n])
-    pids = addprocs(n)
+    pids = addprocs(n, exeflags=`--project=$(Base.active_project())`)
     Vector{Worker{<:Any}}([Worker{of}(names[e], pid) for (e, pid) in enumerate(pids)])
 end
 
@@ -437,7 +446,10 @@ Puts different objects directly into a `Worker`, defines them on that thread's `
 ```
 """
 function put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)
-
+    for pid in pids
+        channel = RemoteChannel(pid)
+        put!(channel, vals ...)
+    end
 end
 
 """
@@ -458,7 +470,7 @@ assign!(f::Function, pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
 
 assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
 ```
-- See also: `processes`, `distribute!`, `waitfor`, `put!`
+- See also: `processes`, `distribute!`, `waitfor`, `put!`, `new_job`
 ---
 ```example
 
@@ -513,6 +525,28 @@ function assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
     [assign!(pm[pid], job) for job in jobs]
  end
 
+
+"""
+```julia
+distribute!(pm::ProcessManager, ..., jobs::AbstractJob ...) -> ::Vector{Int64}
+```
+The `distribute!` Function will distribute jobs amongst all workers or amongst 
+the provided workers.
+```julia
+# distribute to all available workers
+distribute!(pm::ProcessManager, jobs::AbstractJob ...)
+# distribute only to certain workers:
+distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...)
+
+# distribute a percentage of workers:
+distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...)
+```
+- See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`
+---
+```example
+ 
+```
+"""
 function distribute! end
 
 function distribute!(pm::ProcessManager, jobs::AbstractJob ...)
