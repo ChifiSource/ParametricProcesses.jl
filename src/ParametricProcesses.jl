@@ -34,6 +34,7 @@ With extensions, this management framework could be used further with other form
  - `get_return`
  - `worker_pids`
  - `assign_open!`
+ - `distribute_open!`
 """
 module ParametricProcesses
 import Base: show, getindex, push!, delete!, put!, take!
@@ -308,7 +309,7 @@ This function is used to create new workers with the process type `of`.
     New workers will be named with `names`. Not passing names for each worker will name workers 
     by PID.
 ```julia
-create_workers(n::Int64, of::Type{Async})
+create_workers(n::Int64, of::Type{Threaded})
 create_workers(n::Int64, of::Type{Async})
 ```
 ---
@@ -325,7 +326,7 @@ function create_workers(n::Int64, of::Type{Threaded},
 end
 
 function create_workers(n::Int64, of::Type{Async}, names::Vector{String} = ["$e" for e in 1:n])
-
+    Vector{Worker{<:Any}}([Worker{Async}(name, rand(1000:3000)) for x in 1:n])
 end
 
 """
@@ -484,6 +485,14 @@ From worker 2:	hello
 """
 function put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)
     for pid in pids
+        channel = RemoteChannel(pid)
+        put!(channel, vals ...)
+    end
+end
+
+function put!(pm::ProcessManager, vals ...)
+    for w in pm.workers
+        pid = w.pid
         channel = RemoteChannel(pid)
         put!(channel, vals ...)
     end
@@ -658,7 +667,7 @@ function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::Abstr
     worker_pids::Vector{Int64}
 end
 
-distribute!(pm::ProcessManager, jobs::AbstractJob ...) = distribute!(pm, [w.pid for w in pm.workers])
+distribute!(pm::ProcessManager, jobs::AbstractJob ...) = distribute!(pm, [w.pid for w in pm.workers], jobs ...)
 
 """
 ```julia
@@ -679,29 +688,9 @@ end
 
 function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...)
     total_workers = length(pm.workers)
-    num_workers_to_use = round(Int, percentage * total_workers)
-    
-    open = filter(w -> ~w.active, pm.workers)
-    num_open = length(open)
-    
-    if num_open < num_workers_to_use
-        # If there aren't enough open workers, assign jobs asynchronously
-        async_workers = filter(w -> w.active, pm.workers)
-        for job in jobs
-            if isempty(async_workers)
-                error("Not enough open and active workers to distribute the jobs.")
-            end
-            worker = popfirst!(async_workers)
-            assign!(worker, job)
-        end
-        return [w.pid for w in async_workers]
-    end
-    # Assign jobs to open workers
-    for job in jobs
-        worker = popfirst!(open)
-        assign!(worker, job)
-    end
-    return [w.pid for w in open]
+    num_workers = round(Int, percentage * total_workers)
+    ws = [pm.workers[rand(1:total_workers)] for e in num_workers]
+    distribute!(pm, (w.pid for w in ws) ...)
 end
 
 export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids
