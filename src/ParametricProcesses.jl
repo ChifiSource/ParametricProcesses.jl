@@ -440,11 +440,22 @@ end
 ```julia
 get_return!(pm::ProcessManager, pids::Any ...) -> ::Vector{<:Any}
 ```
-Gets the return of all the workers with the pids of `pids` from `pm`, the `ProcessManager`.
+Gets the return of all the workers with the pids of `pids` from `pm`, the `ProcessManager`. Note that 
+`waitfor` will also give the return of each `Worker` it waits for. `get_return!` is used to grab the `ret` return 
+from each `Worker` without waiting for the process to stop. This means that the return may remain unchanged. In the 
+    following example, `get_return!` is essentially redundant, as we could simply call `waitfor` and anticipate a return. 
+    However, we probably usually want to make sure a task is done before trying to get the return. This can be monitored with 
+    the `Worker.active` field.
 
 ---
 ```example
+myprocs = processes(4)
+jb = new_job(+, 5, 5)
+assign!(myprocs, 2, jb)
+waitfor(pm, 2); x = get_return!(pm, 2)[1]
 
+assign!(myprocs, 2, jb)
+x2 = waitfor(myprocs, 2)
 ```
 """
 function get_return!(pm::ProcessManager, pids::Any ...)
@@ -458,7 +469,16 @@ put!(pm::ProcessManager, pids::Vector{Int64}, vals ...) -> ::Nothing
 Puts different objects directly into a `Worker`, defines them on that thread's `Main`.
 ---
 ```example
+myprocs = processes(4)
+message = "hello"
+put!(myprocs, 2, message)
+jb = new_job() do 
+    println(message)
+end
 
+assign!(myprocs, 2, jb)
+
+From worker 2:	hello
 ```
 """
 function put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)
@@ -489,7 +509,18 @@ assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
 - See also: `processes`, `distribute!`, `waitfor`, `put!`, `new_job`
 ---
 ```example
+procs = processes(5)
 
+jb1 = new_job(println, "hello world!")
+jb2 = new_job() do
+    sleep(5)
+    println("job 2")
+jb3 = new_job() do 
+    sleep(5)
+    println("job 3")
+end
+
+assign!(procs, 2, jb2)
 ```
 """
 function assign! end
@@ -539,8 +570,7 @@ end
 
 function assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
     [assign!(pm[pid], job) for job in jobs]
- end
-
+end
 
 """
 ```julia
@@ -559,7 +589,17 @@ distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...)
 - See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`
 ---
 ```example
- 
+procs = processes(5)
+
+jb1 = new_job(println, "hello world!")
+jb2 = new_job() do
+    sleep(5)
+    println("job 2")
+jb3 = new_job() do 
+    sleep(5)
+    println("job 3")
+end
+
 ```
 """
 function distribute! end
