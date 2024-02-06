@@ -33,6 +33,7 @@ With extensions, this management framework could be used further with other form
  - `waitfor`
  - `get_return`
  - `worker_pids`
+ - `assign_open!`
 """
 module ParametricProcesses
 import Base: show, getindex, push!, delete!, put!, take!
@@ -54,7 +55,7 @@ abstract type AbstractWorker end
 ### abstract type Process
 A `Process` is a type only by name, and is used to denote the type of a `Worker`.
 
-- See also: `Worker`, `processes`, `Async`, `Threaded`
+- See also: `Worker`, `processes`, `Async`, `Threaded`, `assign!`, `assign_open!`
 ##### consistencies
 - pid**::Int64**
 - active**::Bool**
@@ -506,7 +507,7 @@ assign!(f::Function, pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
 
 assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
 ```
-- See also: `processes`, `distribute!`, `waitfor`, `put!`, `new_job`
+- See also: `processes`, `distribute!`, `waitfor`, `put!`, `new_job`, `assign_open!`
 ---
 ```example
 procs = processes(5)
@@ -574,6 +575,36 @@ end
 
 """
 ```julia
+assign_open!(pm::ProcessManager, job::AbstractJob ...) -> ::Int64
+```
+Assigns a single `AbstractJob` to an open worker. If no open workers are available, `distribute!` will be called.
+- See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`, `distribute!`
+---
+```example
+procs = processes(5)
+
+jb1 = new_job(println, "hello world!")
+jb2 = new_job() do
+    sleep(5)
+    println("job 2")
+jb3 = new_job() do 
+    sleep(5)
+    println("job 3")
+end
+```
+"""
+function assign_open!(pm::ProcessManager, job::AbstractJob ...)
+    open = findfirst(w -> w.active == false, pm.workers)
+    if ~(isnothing(open))
+        w = pm.workers[open]
+        [assign!(w, j) for j in job]
+        return(w.pid)
+    end
+    distribute!(pm, job ...)
+end
+
+"""
+```julia
 distribute!(pm::ProcessManager, ..., jobs::AbstractJob ...) -> ::Vector{Int64}
 ```
 The `distribute!` Function will distribute jobs amongst all workers or amongst 
@@ -586,7 +617,7 @@ distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ..
 # distribute a percentage of workers:
 distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...)
 ```
-- See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`
+- See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`, `distribute_open!`
 ---
 ```example
 procs = processes(5)
@@ -600,25 +631,50 @@ jb3 = new_job() do
     println("job 3")
 end
 
+distribute!(pm, jb1, jb2, jb3)
+
+# distribute to only `1` and `2`
+distribute!(pm, [1, 2], jb2, jb3, jb3, jb2, jb1)
+
 ```
 """
 function distribute! end
 
-function distribute!(pm::ProcessManager, jobs::AbstractJob ...)
-    jobs = [job for job in jobs]
-    n_jobs = length(jobs)
-    open = filter(w::AbstractWorker -> ~(w.active), pm.workers)
-    at = 1
-    n_open = length(open)
+function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...)
+    worker_pids::Vector{Int64} = Vector{Int64}()
+    at::Int64 = 1
+    n_open::Int64 = length(worker_pids)
     [begin
+        if at == n_open
+            at = 1
+        end
+        worker = pm.workers[at]
         assign!(worker, job)
+        at += 1
+        if ~(worker.pid in worker_pids)
+            push!(worker_pids, worker.pid)
+        end
     end for job in jobs]
-    [w.pid for w in open]
+    worker_pids::Vector{Int64}
 end
 
-function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...)
-    workers = [pm.workers[id] for id in worker_pids]
-    return worker_pids
+distribute!(pm::ProcessManager, jobs::AbstractJob ...) = distribute!(pm, [w.pid for w in pm.workers])
+
+"""
+```julia
+distribute_open!(pm::ProcessManager, job::AbstractJob ...) -> ::Vector{Int64}
+```
+
+- See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`, `distribute!`, `Worker`, `ProcessManager`
+---
+```example
+procs = processes(5)
+
+```
+"""
+function distribute_open!(pm::ProcessManager, jobs::AbstractJob ...)
+    open = filter(w::AbstractWorker -> ~(w.active), pm.workers)
+    distribute!(pm, [w.pid for w in open], jobs ...)
 end
 
 function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...)
