@@ -2,7 +2,7 @@
   <img src="https://github.com/ChifiSource/image_dump/blob/main/parametricprocesses/parproc.png" width="375"></img>
 </div>
 
-`ParametricProcesses` offers a parametric `Worker` type capable of facilitating multiple forms of parallel processing and high-level declarative `Distributed` worker management.
+`ParametricProcesses` offers a parametric `Worker` type and a `ProcessManager` API capable of facilitating multiple forms of parallel processing and high-level declarative `Distributed` worker management.
 ```julia
 using Pkg; Pkg.add("ParametricProcesses")
 # Unstable:
@@ -12,6 +12,7 @@ using Pkg; Pkg.add("ParametricProcesses", rev = "Unstable")
 - [usage](#usage)
   -  [workers](#workers)
   -  [jobs](#jobs)
+-  [examples](#examples)
 - [contributing](#contributing)
   - [adding workers](#extensions)
   - [contributing guidelines](#guidelines)
@@ -99,6 +100,15 @@ From here, we have access to the following functions to distribute our jobs amon
 Consider the following `waitfor` example:
 ```julia
 ```
+### examples
+
+ ---
 ### contributing
+There are several ways to contribute to the `ParametricProcesses` package.
+- submitting [issues](https://github.com/ChifiSource/ParametricProcesses.jl/issues) ([guidelines](#guidelines))
+- [creating `Worker` extensions](#adding-workers).
+- forking and pull-requestion ([guildelines](#guidelines))
+- trying other [chifi](https://github.com/ChifiSource) projects.
+- contributing to other [chifi](https://github.com/ChifiSource) projects (gives more attention here).
 ##### adding workers
 ##### guidelines
