@@ -16,11 +16,11 @@ using Pkg; Pkg.add("ParametricProcesses", rev = "Unstable")
   - [adding workers](#extensions)
   - [contributing guidelines](#guidelines)
 ### usage
-- For a **full** list of exports, try `?ParametricProcesses`
 Before trying to use threaded `Workers` (`Workers{Threaded}`), make sure to start **julia with multiple threads**!
 ```julia
 julia --threads 6
 ```
+- For a **full** list of exports, try `?ParametricProcesses`
 ```julia
 using ParametricProcesses
 procs = processes(5)
