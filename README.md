@@ -14,8 +14,9 @@ using Pkg; Pkg.add("ParametricProcesses", rev = "Unstable")
   -  [jobs](#jobs)
 - [contributing](#contributing)
   - [adding workers](#extensions)
-  - [contributing guidelines](#contributing-guidelines)
+  - [contributing guidelines](#guidelines)
 ### usage
+- For a **full** list of exports, try `?ParametricProcesses`
 Before trying to use threaded `Workers` (`Workers{Threaded}`), make sure to start **julia with multiple threads**!
 ```julia
 julia --threads 6
@@ -59,7 +60,7 @@ julia>       From worker 7:	hello
 
 ```
 ##### workers
-The *typical* `ParametricProcesses` workflow involves creating a process manager with workers, then creating jobs and distributing them amongst those workers using `assign!` and `distribute!`.  To get started, we can create a `ProcessManager` by using the `processes` Function. This `Function` will take an `Int64` and optionally, a `Process` type. The default process type will be `Threaded`, so ensure you have multiple threads.
+The *typical* `ParametricProcesses` workflow involves creating a process manager with workers, then creating jobs and distributing them amongst those workers using `assign!` and `distribute!`.  To get started, we can create a `ProcessManager` by using the `processes` Function. This `Function` will take an `Int64` and optionally, a `Process` type. The default process type will be `Threaded`, so ensure you have multiple threads for the following example:
 ```julia
 procs = processes(5)
 ```
@@ -67,10 +68,37 @@ We can create a process manager with workers of any type using this same `Functi
 ```julia
 async_procs = processes(2, Async)
 ```
-`Workers` are held in the `w.Workers` field, we can also add workers directly, or create workers and `push!` them.
+`Workers` are held in the `ProcessManager.workers` field, we can also add workers directly with the `add_workers!` function, or create workers manually and `push!` them.
 ```julia
 
 ```
+`Workers` can be indexed by their name or their pid.
+```julia
+
+```
+Here is a list of other functions used to manage workers.
+- `close(pm::ProcessManager)` - closes **all** active `Workers` in `pm`.
+- `delete!(pm::ProcessManager, pid::Int64)` - closes `Worker` by `pid`
+- `delete!(pm::ProcessManager, name::String)` - closes `Worker` by `name`.
+- `worker_pids(pm::ProcessManager)`  - returns worker process identifiers for all `Workers` in `pm.workers`
+- `waitfor(pm::ProcessManager, pids::Any ...)` - waits for `pids` to finish, then returns their returns in a `Vector{Any}`
+- `put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)` - serializes data and defines in in the `Main` of each process in `pids`.
+
+There is also `@everywhere` used to define functions and modules across all workers, as well as `@distribute` to use all available workers for iteration.
+
+- For a **full** list of exports, try `?ParametricProcesses`
 ##### jobs
+In order to use our threads to complete tasks, we will need to construct a sub-type of `AbstractJob`. The running type for this is `ProcessJob`, which may be called from the `new_job` binding. We provide this with a `Function` that takes arguments, as well as the arguments we seek to provide to that `Function` (if any).
+```julia
 
+```
+From here, we have access to the following functions to distribute our jobs amongst our `Workers`.
+```julia
 
+```
+Consider the following `waitfor` example:
+```julia
+```
+### contributing
+##### adding workers
+##### guidelines
