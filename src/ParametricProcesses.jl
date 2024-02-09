@@ -35,9 +35,10 @@ With extensions, this management framework could be used further with other form
  - `worker_pids`
  - `assign_open!`
  - `distribute_open!`
+ - `close`
 """
 module ParametricProcesses
-import Base: show, getindex, push!, delete!, put!, take!
+import Base: show, getindex, push!, delete!, put!, take!, close
 using Distributed
 
 """
@@ -225,7 +226,7 @@ myprocs = processes(5)
 asyncprocs = processes(2, Async, "first", "second")
 ```
 `processes` simply calls `create_workers` with the provided `of` and then a `ProcessManager` constructor.
-- See also: assign!, distribute!, waitfor, add_workers!, get_return!, processes, Worker, use_with!, put!
+- See also: assign!, distribute!, waitfor, add_workers!, get_return!, processes, Worker, use_with!, put!, `close`
 ```julia
 - ProcessManager(workers::Worker{<:Any} ...)
 - ProcessManager(workers::Vector{<:AbstractWorker})
@@ -281,16 +282,52 @@ function getindex(pm::ProcessManager, pid::Int64)
     pm.workers[pos]
 end
 
+"""
+```julia
+close(pm::ProcessManager) -> ::ProcessManager
+```
+Strips a process manager of all current workers (closes all workers.)
+```julia
+
+```
+---
+```example
+
+```
+"""
+close(pm::ProcessManager) = [delete!(pm, pid) for id in worker_pids(pm)]; nothing
+
+"""
+```julia
+close(w::Worker{<:Any}) -> ::Nothing
+```
+Closes a worker directly. For example, the `Worker{Threaded}` here will close 
+your process IDs. `async` will simply get rid of the task. This function is not 
+necessarily intended to be called directly, 
+```julia
+
+```
+---
+```example
+
+```
+"""
+function close(w::Worker{Threaded})
+    rmprocs(w.pid)
+end
+
 function delete!(pm::ProcessManager, pid::Int64)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
     if isnothing(pos)
         # throw
     end
-    rmprocs(pid)
-    deleteat!(pm.workers, pos)
+    close(pm.workers[pos])
+    deleteat!(pm, pos)
+    GC.gc()
+    pm::ProcessManager
 end
 
-push!(pm::ProcessManager, w::Worker{<:Any}) = push!(pm.workers, w)
+push!(pm::ProcessManager, w::Worker{<:Any}) = push!(pm.workers, w) ; pm
 
 function delete!(pm::ProcessManager, name::String)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
@@ -299,12 +336,13 @@ function delete!(pm::ProcessManager, name::String)
     end
     rmprocs(pm.workers[pos].pid)
     deleteat!(pm.workers, pos)
+    pm
 end
 
 """
 ```julia
 create_workers(n::Int64, of::Type{Threaded}, names::Vector{String} = ...) -> ::Workers
-````
+```
 This function is used to create new workers with the process type `of`. 
     New workers will be named with `names`. Not passing names for each worker will name workers 
     by PID.
@@ -356,6 +394,7 @@ function add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Thread
         workers = create_workers(n, of, [name for name in names])
     end
     pm.workers = vcat(pm.workers, workers)
+    pm
 end
 
 """

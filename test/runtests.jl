@@ -25,9 +25,18 @@ end
 @testset "Worker API" do
     aworker = create_workers(2, Async)
     @test typeof(aworker[1]) = Worker{ParametricProcesses.Async}
-    procs = processes(2)
+    procs = processes(1)
     @test typeof(procs.workers) == Workers{<:Any}
+    @test worker_pids(procs) == [2]
+    add_workers!(procs, 1, Threaded, "example")
     @test worker_pids(procs) == [2, 3]
+    w = nothing
+    try
+        w = procs.workers["example"]
+    catch
+        w = nothing
+    end
+    @test typeof(w) == Worker{Threaded}
     
 end
 
