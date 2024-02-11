@@ -188,7 +188,7 @@ Workers{T} (Alias for Vector{T} where {T <: AbstractWorker})
 `Workers` represents an allocation of workers, typically of a certain type. 
 For `Workers` multiple types, use `Workers{<:Process}` or `Workers{<:Any}`.
 """
-const Workers{T} = Vector{T} where {T <: AbstractWorker}
+const Workers{T} = Vector{T} where {T <: Worker{<:Any}}
 
 function show(io::IO, worker::Worker{<:Any})
     T = typeof(worker).parameters[1]
@@ -226,7 +226,7 @@ myprocs = processes(5)
 asyncprocs = processes(2, Async, "first", "second")
 ```
 `processes` simply calls `create_workers` with the provided `of` and then a `ProcessManager` constructor.
-- See also: assign!, distribute!, waitfor, add_workers!, get_return!, processes, Worker, use_with!, put!, `close`
+- See also: assign!, distribute!, waitfor, add_workers!, get_return!, processes, Worker, put!, `close`
 ```julia
 - ProcessManager(workers::Worker{<:Any} ...)
 - ProcessManager(workers::Vector{<:AbstractWorker})
@@ -295,7 +295,7 @@ Strips a process manager of all current workers (closes all workers.)
 
 ```
 """
-close(pm::ProcessManager) = [delete!(pm, pid) for id in worker_pids(pm)]; nothing
+close(pm::ProcessManager) = [delete!(pm, pid) for pid in worker_pids(pm)]; GC.gc(); nothing
 
 """
 ```julia
@@ -316,21 +316,27 @@ function close(w::Worker{Threaded})
     rmprocs(w.pid)
 end
 
+function close(w::Worker{Async})
+
+end
+
 function delete!(pm::ProcessManager, pid::Int64)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
     if isnothing(pos)
         # throw
     end
     close(pm.workers[pos])
-    deleteat!(pm, pos)
-    GC.gc()
+    deleteat!(pm.workers, pos)
     pm::ProcessManager
 end
 
-push!(pm::ProcessManager, w::Worker{<:Any}) = push!(pm.workers, w) ; pm
+push!(pm::ProcessManager, w::Worker{<:Any}) = begin
+    push!(pm.workers, w)
+    pm::ProcessManager
+end
 
 function delete!(pm::ProcessManager, name::String)
-    pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
+    pos = findfirst(worker::Worker{<:Any} -> worker.name == name, pm.workers)
     if isnothing(pos)
         # throw
     end
@@ -364,7 +370,7 @@ function create_workers(n::Int64, of::Type{Threaded},
 end
 
 function create_workers(n::Int64, of::Type{Async}, names::Vector{String} = ["$e" for e in 1:n])
-    Vector{Worker{<:Any}}([Worker{Async}(name, rand(1000:3000)) for x in 1:n])
+    Vector{Worker{<:Any}}([Worker{Async}(name, rand(1000:3000)) for (name, x) in zip(names, 1:n)])
 end
 
 """
@@ -732,7 +738,6 @@ function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob 
     distribute!(pm, (w.pid for w in ws) ...)
 end
 
-export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids
-export Threaded, new_job, @everywhere, get_return!, waitfor, use_with!, Async, RemoteChannel
-
+export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids, Workers
+export Threaded, new_job, @everywhere, get_return!, waitfor, Async, RemoteChannel, @distributed
 end # module BasicProcesses
