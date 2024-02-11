@@ -391,6 +391,7 @@ function create_workers end
 
 function create_workers(n::Int64, of::Type{Threaded}, 
     names::Vector{String} = ["$e" for e in 1:n])
+    pids = Vector{Int64}()
     try
         pids = addprocs(n, exeflags=`--project=$(Base.active_project())`)
     catch e

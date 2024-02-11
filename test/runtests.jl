@@ -8,19 +8,26 @@ if nthrds < 3
     @info "run julia with threads set to 3: `julia --threads 3`"
 end
 
-@testset "Type System" begin
-    @test typeof(ProcessJob(s -> println(s), "example")) == ParametricProcesses.ProcessJob
-    w = Worker{ParametricProcesses.Async}("1", 1)
-    @test typeof(w) == Worker{Async}
-    pm = ProcessManager(w)
-    @test pm["1"] == w
-    @test pm[1] == w
-    delete!(pm, w.pid)
-    @test length(pm.workers) == 0
-    push!(pm, w)
-    @test length(pm.workers) == 1
-    delete!(pm, w.name)
-    @test length(pm.workers) == 0
+@testset "Type System" verbose = true begin
+    w = nothing
+    @testset "jobs and workers" begin
+        @test typeof(ProcessJob(s -> println(s), "example")) == ParametricProcesses.ProcessJob
+        w = Worker{ParametricProcesses.Async}("1", 1)
+        @test typeof(w) == Worker{Async}
+    end
+    @testset "process manager" begin
+        pm = ProcessManager(w)
+        @test pm["1"] == w
+        @test pm[1] == w
+        @test_throws KeyError pm["3"]
+        @test_throws KeyError pm[3]
+        delete!(pm, w.pid)
+        @test length(pm.workers) == 0
+        push!(pm, w)
+        @test length(pm.workers) == 1
+        delete!(pm, w.name)
+        @test length(pm.workers) == 0
+    end
 end
 
 @testset "Worker API" begin
