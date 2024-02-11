@@ -21,6 +21,8 @@ With extensions, this management framework could be used further with other form
  - `Worker{T <: Process}`
  - `Workers{T}`
  - `ProcessManager`
+ - `close(pm::ProcessManager)`
+ - `close(w::Worker)`
  - `delete!(pm::ProcessManager, name::String)`
  - `delete!(pm::ProcessManager, pid::Int64)`
  - `push!(pm::ProcessManager, w::Worker{<:Any})`
@@ -30,12 +32,12 @@ With extensions, this management framework could be used further with other form
  - `processes`
  - `assign!`
  - `distribute!`
+ - `ProcessError`
  - `waitfor`
  - `get_return`
  - `worker_pids`
  - `assign_open!`
  - `distribute_open!`
- - `close`
 """
 module ParametricProcesses
 import Base: show, getindex, push!, delete!, put!, take!, close
@@ -63,6 +65,30 @@ A `Process` is a type only by name, and is used to denote the type of a `Worker`
 - active**::Bool**
 """
 abstract type Process end
+
+
+"""
+```julia
+ProcessError <: Base.Exception
+```
+- message**::String**
+- ptype**::Process**
+
+The `ProcessError` is meant to be thrown when something goes wrong 
+while creating or using a `Worker` with `assign!` or `create_workers`. 
+    This is *not* meant to facilitate error handling on threads, 
+    `waitfor` alongside `try`/`catch` facilitates this -- this is for 
+    driver errors. In the case of base `ParametricProcesses`, 
+    this error is thrown when there are not enough threads to spawn 
+    the number of threaded workers.
+```julia
+- ProcessError(message::String, ptype::Process)
+```
+"""
+mutable struct ProcessError <: Exception
+    message::String
+    ptype::Process
+end
 
 """
 ### abstract type WorkerProcess
@@ -269,7 +295,7 @@ end
 function getindex(pm::AbstractProcessManager, name::String)
     pos = findfirst(worker::Worker{<:Any} -> worker.name == name, pm.workers)
     if isnothing(pos)
-        # throw
+        throw(KeyError(name))
     end
     pm.workers[pos]
 end
@@ -277,9 +303,32 @@ end
 function getindex(pm::ProcessManager, pid::Int64)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
     if isnothing(pos)
-        # throw
+        throw(KeyError(pid))
     end
     pm.workers[pos]
+end
+
+function close(w::Worker{Threaded})
+    rmprocs(w.pid)
+end
+
+"""
+```julia
+close(w::Worker{<:Any}) -> ::Nothing
+```
+Closes a worker directly. For example, the `Worker{Threaded}` here will close 
+your process IDs. `async` will simply get rid of the task. This function is not 
+necessarily intended to be called directly, 
+```julia
+
+```
+---
+```example
+
+```
+"""
+function close(w::Worker{<:Any})
+
 end
 
 """
@@ -297,33 +346,10 @@ Strips a process manager of all current workers (closes all workers.)
 """
 close(pm::ProcessManager) = [delete!(pm, pid) for pid in worker_pids(pm)]; GC.gc(); nothing
 
-"""
-```julia
-close(w::Worker{<:Any}) -> ::Nothing
-```
-Closes a worker directly. For example, the `Worker{Threaded}` here will close 
-your process IDs. `async` will simply get rid of the task. This function is not 
-necessarily intended to be called directly, 
-```julia
-
-```
----
-```example
-
-```
-"""
-function close(w::Worker{Threaded})
-    rmprocs(w.pid)
-end
-
-function close(w::Worker{Async})
-
-end
-
 function delete!(pm::ProcessManager, pid::Int64)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
     if isnothing(pos)
-        # throw
+        throw(KeyError(pid))
     end
     close(pm.workers[pos])
     deleteat!(pm.workers, pos)
@@ -338,7 +364,7 @@ end
 function delete!(pm::ProcessManager, name::String)
     pos = findfirst(worker::Worker{<:Any} -> worker.name == name, pm.workers)
     if isnothing(pos)
-        # throw
+        throw(KeyError(name))
     end
     rmprocs(pm.workers[pos].pid)
     deleteat!(pm.workers, pos)
@@ -365,7 +391,11 @@ function create_workers end
 
 function create_workers(n::Int64, of::Type{Threaded}, 
     names::Vector{String} = ["$e" for e in 1:n])
-    pids = addprocs(n, exeflags=`--project=$(Base.active_project())`)
+    try
+        pids = addprocs(n, exeflags=`--project=$(Base.active_project())`)
+    catch e
+        throw(ProcessError("could not start $n workers.", Threaded))
+    end
     Vector{Worker{<:Any}}([Worker{of}(names[e], pid) for (e, pid) in enumerate(pids)])
 end
 
@@ -395,7 +425,7 @@ function add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Thread
     if name_n == 0
         workers = create_workers(n, of)
     elseif name_n != n
-        # throw
+        throw(ProcessError("not enough names provided for all workers.", Threaded))
     else
         workers = create_workers(n, of, [name for name in names])
     end
@@ -424,7 +454,7 @@ function processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     if name_n == 0
         workers = create_workers(n, of)
     elseif name_n != n
-        # throw
+        throw(ProcessError("not enough names provided for all workers.", of))
     else
         workers = create_workers(n, of, [name for name in names])
     end
@@ -587,8 +617,8 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
         assigned_worker.active = true
         @async begin
             wait(assigned_task)
-            assigned_worker.active = false
             assigned_worker.ret = fetch(assigned_task)
+            assigned_worker.active = false
         end
         return assigned_worker.pid
     end
@@ -606,7 +636,8 @@ function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJo
         assigned_worker.task = assigned_task
         assigned_worker.active = true
         @async begin
-            wait(worker.assigned_task)
+            wait(assigned_task)
+            assigned_worker.ret = fetch(assigned_task)
             assigned_worker.active = false
         end
         return assigned_worker.pid
@@ -740,4 +771,4 @@ end
 
 export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids, Workers
 export Threaded, new_job, @everywhere, get_return!, waitfor, Async, RemoteChannel, @distributed
-end # module BasicProcesses
+end # module

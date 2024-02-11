@@ -8,7 +8,7 @@ if nthrds < 3
     @info "run julia with threads set to 3: `julia --threads 3`"
 end
 
-@testset "types" begin
+@testset "Type System" begin
     @test typeof(ProcessJob(s -> println(s), "example")) == ParametricProcesses.ProcessJob
     w = Worker{ParametricProcesses.Async}("1", 1)
     @test typeof(w) == Worker{Async}
@@ -45,4 +45,16 @@ end
 
 @testset "ProcessJob API" begin
     procs = processes(2)
+    jb = new_job(2000) do count::Int64
+        count + 5
+    end
+    assign!(procs, 4, jb)
+    @test procs[4].active == true
+    ret = waitfor(procs, 4)
+    @test procs[4].active == false
+    @test ret[1] == 2005
 end
+
+# examples
+include("css_parser.jl")
+include("computational_regression.jl")
