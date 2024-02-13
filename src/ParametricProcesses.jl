@@ -680,12 +680,15 @@ end
 ```
 """
 function assign_open!(pm::ProcessManager, job::AbstractJob ...)
-    open = findfirst(w -> w.active == false, pm.workers)
+    ws = pm.workers
+    ws = filter(w -> typeof(w) != Worker{Async}, ws)
+    open = findfirst(w -> ~(w.active), ws)
     if ~(isnothing(open))
-        w = pm.workers[open]
+        w = ws[open]
         [assign!(w, j) for j in job]
-        return(w.pid)
+        return([w.pid])
     end
+    @info "calling distribute!"
     distribute!(pm, job ...)
 end
 
