@@ -679,9 +679,9 @@ jb3 = new_job() do
 end
 ```
 """
-function assign_open!(pm::ProcessManager, job::AbstractJob ...)
+function assign_open!(pm::ProcessManager, job::AbstractJob ...; not = Async)
     ws = pm.workers
-    ws = filter(w -> typeof(w) != Worker{Async}, ws)
+    ws = filter(w -> typeof(w) != Worker{not}, ws)
     open = findfirst(w -> ~(w.active), ws)
     if ~(isnothing(open))
         w = ws[open]
@@ -689,7 +689,7 @@ function assign_open!(pm::ProcessManager, job::AbstractJob ...)
         return([w.pid])
     end
     @info "calling distribute!"
-    distribute!(pm, job ...)
+    distribute!(pm, job ..., not = not)
 end
 
 """
@@ -724,22 +724,22 @@ distribute!(pm, jb1, jb2, jb3)
 
 # distribute to only `1` and `2`
 distribute!(pm, [1, 2], jb2, jb3, jb3, jb2, jb1)
-
 ```
 """
 function distribute! end
 
-function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...)
+function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...; not = Async)
     worker_pids::Vector{Int64} = Vector{Int64}()
+    ws = filter(w -> typeof(w) != Worker{not}, [pm[pid] for pid in worker_pids])
     at::Int64 = 1
-    n_open::Int64 = length(worker_pids)
+    stop::Int64 = length(ws) + 1
     [begin
-        if at == n_open
-            at = 1
-        end
-        worker = pm.workers[at]
+        worker = ws[at]
         assign!(worker, job)
         at += 1
+        if at == stop
+            at = 1
+        end
         if ~(worker.pid in worker_pids)
             push!(worker_pids, worker.pid)
         end
@@ -747,7 +747,7 @@ function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::Abstr
     worker_pids::Vector{Int64}
 end
 
-distribute!(pm::ProcessManager, jobs::AbstractJob ...) = distribute!(pm, [w.pid for w in pm.workers], jobs ...)
+distribute!(pm::ProcessManager, jobs::AbstractJob ...; not = Async) = distribute!(pm, [w.pid for w in pm.workers], jobs ...; not = not)
 
 """
 ```julia
@@ -761,18 +761,18 @@ procs = processes(5)
 
 ```
 """
-function distribute_open!(pm::ProcessManager, jobs::AbstractJob ...)
+function distribute_open!(pm::ProcessManager, jobs::AbstractJob ...; not = Async)
     open = filter(w::AbstractWorker -> ~(w.active), pm.workers)
-    distribute!(pm, [w.pid for w in open], jobs ...)
+    distribute!(pm, [w.pid for w in open], jobs ...; not = not)
 end
 
-function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...)
+function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...; not = Async)
     total_workers = length(pm.workers)
     num_workers = round(Int, percentage * total_workers)
     ws = [pm.workers[rand(1:total_workers)] for e in num_workers]
-    distribute!(pm, (w.pid for w in ws) ...)
+    distribute!(pm, (w.pid for w in ws) ...; not = not)
 end
 
-export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids, Workers
+export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids, Workers, distribute_open!, assign_open!
 export Threaded, new_job, @everywhere, get_return!, waitfor, Async, RemoteChannel, @distributed
 end # module
