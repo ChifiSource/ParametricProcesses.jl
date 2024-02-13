@@ -481,9 +481,13 @@ worker_pids(pm::ProcessManager) = [w.pid for w in pm.workers]
 """
 ```julia
 waitfor(pm::ProcessManager, pids::Any ...) -> ::Vector{Any}
+waitfor(pm::ProcessManager) -> ::Vector{<:Any}
+waitfor(f::Function, pm::ProcessManager, pids::Any ...) -> ::Vector{<:Any}
 ```
 Stalls the main thread process to wait for all pids provided to `pids`. 
-Will return a `Vector{Any}` containing the completed returns for each `Worker`.
+Will return a `Vector{Any}` containing the completed returns for each `Worker`. Providing 
+    no pids will `waitfor` all busy workers. Using `waitfor(f::Function, ...)` will run `f` 
+    after `pids` are complete.
 ---
 ```example
 pm = processes(4)
@@ -504,6 +508,26 @@ ret = waitfor(pm, 2); println("worker 2 completed, it returned: ", ret[1])
 """
 function waitfor(pm::ProcessManager, pids::Any ...)
     workers = [pm[pid] for pid in pids]
+    while true
+        next = findfirst(w -> w.active == true, workers)
+        if isnothing(next)
+            break
+        end
+        wait(workers[next].task)
+    end
+    [pm[pid].ret for pid in pids]
+end
+
+waitfor(f::Function, pm::ProcessManager, pids::Any ...) = begin
+    ret = waitfor(pm, pids ...)
+    f(ret)
+end
+
+function waitfor(pm::ProcessManager)
+    workers = filter(w -> w.active, pm.workers)
+    if length(workers) == 0
+        return(Vector{Any}())
+    end
     while true
         next = findfirst(w -> w.active == true, workers)
         if isnothing(next)
@@ -661,7 +685,7 @@ end
 
 """
 ```julia
-assign_open!(pm::ProcessManager, job::AbstractJob ...) -> ::Int64
+assign_open!(pm::ProcessManager, job::AbstractJob ...; ; not::Process = Async) -> ::Int64
 ```
 Assigns a single `AbstractJob` to an open worker. If no open workers are available, `distribute!` will be called.
 - See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`, `distribute!`
@@ -694,7 +718,7 @@ end
 
 """
 ```julia
-distribute!(pm::ProcessManager, ..., jobs::AbstractJob ...) -> ::Vector{Int64}
+distribute!(pm::ProcessManager, ..., jobs::AbstractJob ...; not::Process = Async) -> ::Vector{Int64}
 ```
 The `distribute!` Function will distribute jobs amongst all workers or amongst 
 the provided workers.
@@ -751,13 +775,14 @@ distribute!(pm::ProcessManager, jobs::AbstractJob ...; not = Async) = distribute
 
 """
 ```julia
-distribute_open!(pm::ProcessManager, job::AbstractJob ...) -> ::Vector{Int64}
+distribute_open!(pm::ProcessManager, job::AbstractJob ...; not::Process = Async) -> ::Vector{Int64}
 ```
 
 - See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`, `distribute!`, `Worker`, `ProcessManager`
 ---
 ```example
 procs = processes(5)
+
 
 ```
 """
