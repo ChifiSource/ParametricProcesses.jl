@@ -535,7 +535,7 @@ function waitfor(pm::ProcessManager)
         end
         wait(workers[next].task)
     end
-    [pm[pid].ret for pid in pids]
+    [worker.pid for worker in workers]
 end
 
 """
@@ -712,7 +712,6 @@ function assign_open!(pm::ProcessManager, job::AbstractJob ...; not = Async)
         [assign!(w, j) for j in job]
         return([w.pid])
     end
-    @info "calling distribute!"
     distribute!(pm, job ..., not = not)
 end
 
@@ -753,7 +752,6 @@ distribute!(pm, [1, 2], jb2, jb3, jb3, jb2, jb1)
 function distribute! end
 
 function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...; not = Async)
-    worker_pids::Vector{Int64} = Vector{Int64}()
     ws = filter(w -> typeof(w) != Worker{not}, [pm[pid] for pid in worker_pids])
     at::Int64 = 1
     stop::Int64 = length(ws) + 1
