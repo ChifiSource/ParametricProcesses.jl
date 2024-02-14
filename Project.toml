@@ -8,7 +8,7 @@ Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 
 [compat]
 julia = "1.5"
-Distributed = "1.11.0"
+Distributed = "1.9.2"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

@@ -655,6 +655,14 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
     assigned_worker.pid
 end
 
+function assign!(assigned_worker::Worker{Async}, job::AbstractJob)
+    assigned_worker.active = true
+    assigned_worker.task = @async begin
+        job.f(job.args ...; job.keyargs ...)
+        assigned_worker.active = false
+    end
+end
+
 function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJob)
     if ~(assigned_worker.active)
         assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
