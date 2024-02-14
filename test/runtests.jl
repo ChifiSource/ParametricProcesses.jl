@@ -77,6 +77,3 @@ end
     hellw = waitfor(procs, pid) 
     @test hellw[1] == "hello world"
 end
-
-# examples
-include("css_parser.jl")
