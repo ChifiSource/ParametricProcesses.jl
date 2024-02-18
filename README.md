@@ -1,6 +1,10 @@
 <div align="center">
   <img src="https://github.com/ChifiSource/image_dump/blob/main/parametricprocesses/parproc.png" width="375"></img>
+
+  [![version](https://juliahub.com/docs/General/ParametricProcesses/stable/version.svg)](https://juliahub.com/ui/Packages/General/ParametricProcesses)
+  
 </div>
+
 
 `ParametricProcesses` offers a parametric `Worker` type and a `ProcessManager` API capable of facilitating multiple forms of parallel processing and high-level declarative `Distributed` worker management.
 ```julia
@@ -14,7 +18,7 @@ using Pkg; Pkg.add("ParametricProcesses", rev = "Unstable")
   -  [jobs](#jobs)
 -  [examples](#examples)
 - [contributing](#contributing)
-  - [adding workers](#extensions)
+  - [adding workers](#adding-extensions)
   - [contributing guidelines](#guidelines)
 ### usage
 Before trying to use threaded `Workers` (`Workers{Threaded}`), make sure to start **julia with multiple threads**!
@@ -216,7 +220,6 @@ mret = vcat(waitfor(procs, ids ...) ...)
 @test length(ret) == length(mret)
 ```
 In the above example, `distribute!` is used to perform the tasks on 5 threads instead of one. While this does not necessarily offer a huge benefit to performance as parsing CSS is pretty simple and it is more CPU work to serialize the data for the thread, this examples does show pretty well how to easily replicate tasks across several workers.
-
  ---
 ### contributing
 There are several ways to contribute to the `ParametricProcesses` package.
@@ -226,6 +229,18 @@ There are several ways to contribute to the `ParametricProcesses` package.
 - trying other [chifi](https://github.com/ChifiSource) projects.
 - contributing to other [chifi](https://github.com/ChifiSource) projects (gives more attention here).
 ##### adding workers
+Adding your own `Workers` is pretty straightforward. We can create new functionality by creating a new <: `Process` or a new <: `AbstractWorker`. A `Process` is used to change the functionality of a `Worker`, an `AbstractWorker` extension usually means we need to facilitate different types of `Worker` data or `ProcessManager` functionality. Creating a `Process` is very simple, as a `Process` is simply an `abstract` type.
+```julia
+abstract type CUDA <: Process end
+```
+From here, we have a few bindings which will need to be defined:
+```julia
+close(w::Worker{Process})
+create_workers(n::Int64, of::Type{Process}, 
+    names::Vector{String} = ["$e" for e in 1:n])
+assign!(assigned_worker::Worker{Process}, job::AbstractJob)
+```
+Pretty simple; these are the main functionality that changes when we are using different hardware -- allocating jobs, creating workers to do the jobs, and closing the workers will all be different depending on what `Process` we are using. Fortunately, a `Worker` will fit entirely into the API by simply extending these three, so with these simple functions we can easily create high-level bindings to distribute our jobs over a myriad of different worker types. If we wanted to create our own `Worker`, things would get a little more complicated. It is also possible to make your own sub-type of `AbstractProcessManager` or `AbstractJob` and extend that way. All of the information needed to follow consistencies for these super-types are available in the documentation.
 ##### guidelines
 We are not super picky on contributions, as the goal of [chifi](https://github.com/ChifiSource) is to get more people involved in computing. However, if you want your code merged there are definitely a few things to be aware of before contributing to this package.
 - If there is no issue for what you want to do, [create an issue](https://github.com/ChifiSource/ParametricProcesses.jl)
