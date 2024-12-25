@@ -198,12 +198,12 @@ assign!(pm, 500, jb)
 """
 mutable struct Worker{T <: Process} <: AbstractWorker
     name::String
-    pid::Int64
+    pid::UInt16
     ret::Any
     active::Bool
     task::Any
-    Worker{T}(name::String, pid::Int64) where {T <: Process} = begin
-        new{T}(name, pid, nothing, false, nothing)
+    Worker{T}(name::String, pid::Integer) where {T <: Process} = begin
+        new{T}(name, UInt16(pid), nothing, false, nothing)
     end
 end
 
@@ -300,7 +300,8 @@ function getindex(pm::AbstractProcessManager, name::String)
     pm.workers[pos]
 end
 
-function getindex(pm::ProcessManager, pid::Int64)
+function getindex(pm::ProcessManager, pid::Integer)
+    pid = UInt16(pid)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
     if isnothing(pos)
         throw(KeyError(pid))
