@@ -198,12 +198,12 @@ assign!(pm, 500, jb)
 """
 mutable struct Worker{T <: Process} <: AbstractWorker
     name::String
-    pid::UInt16
+    pid::Int64
     ret::Any
     active::Bool
     task::Any
-    Worker{T}(name::String, pid::Integer) where {T <: Process} = begin
-        new{T}(name, UInt16(pid), nothing, false, nothing)
+    Worker{T}(name::String, pid::Int64) where {T <: Process} = begin
+        new{T}(name, pid, nothing, false, nothing)
     end
 end
 
@@ -300,8 +300,7 @@ function getindex(pm::AbstractProcessManager, name::String)
     pm.workers[pos]
 end
 
-function getindex(pm::ProcessManager, pid::Integer)
-    pid = UInt16(pid)
+function getindex(pm::ProcessManager, pid::Int64)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
     if isnothing(pos)
         throw(KeyError(pid))
@@ -479,6 +478,16 @@ worker_pids(pm)
 """
 worker_pids(pm::ProcessManager) = [w.pid for w in pm.workers]
 
+worker_pids(pm::ProcessManager, type::Type{<:Process}) = begin
+    pids = Vector{Int64}()
+    for worker in pm.workers
+        if typeof(worker).parameters[1] == type
+            push!(pids, worker.pid)
+        end
+    end
+    return(pids)::Vector{Int64}
+end
+
 """
 ```julia
 waitfor(pm::ProcessManager, pids::Any ...) -> ::Vector{Any}
@@ -515,6 +524,7 @@ function waitfor(pm::ProcessManager, pids::Any ...)
             break
         end
         wait(workers[next].task)
+        workers[next].active = false
     end
     [pm[pid].ret for pid in pids]
 end
@@ -641,7 +651,7 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
         assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
         assigned_worker.task = assigned_task
         assigned_worker.active = true
-        @async begin
+        @sync begin
             wait(assigned_task)
             assigned_worker.ret = fetch(assigned_task)
             assigned_worker.active = false
