@@ -478,6 +478,16 @@ worker_pids(pm)
 """
 worker_pids(pm::ProcessManager) = [w.pid for w in pm.workers]
 
+worker_pids(pm::ProcessManager, type::Type{<:Process}) = begin
+    pids = Vector{Int64}()
+    for worker in pm.workers
+        if typeof(worker).parameters[1] == type
+            push!(pids, worker.pid)
+        end
+    end
+    return(pids)::Vector{Int64}
+end
+
 """
 ```julia
 waitfor(pm::ProcessManager, pids::Any ...) -> ::Vector{Any}
@@ -514,6 +524,7 @@ function waitfor(pm::ProcessManager, pids::Any ...)
             break
         end
         wait(workers[next].task)
+        workers[next].active = false
     end
     [pm[pid].ret for pid in pids]
 end
@@ -640,7 +651,7 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
         assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
         assigned_worker.task = assigned_task
         assigned_worker.active = true
-        @async begin
+        @sync begin
             wait(assigned_task)
             assigned_worker.ret = fetch(assigned_task)
             assigned_worker.active = false
