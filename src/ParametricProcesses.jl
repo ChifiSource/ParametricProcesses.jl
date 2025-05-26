@@ -353,7 +353,7 @@ end
 
 """
 ```julia
-close(pm::ProcessManager) -> ::ProcessManager
+close(pm::AbstractProcessManager) -> ::ProcessManager
 ```
 Strips a process manager of all current workers (closes all workers.)
 ```julia
@@ -745,7 +745,6 @@ function assign!(f::Function, pm::AbstractProcessManager, pid::Any, jobs::Abstra
 end
 
 function assign!(pm::AbstractProcessManager, pid::Any, jobs::AbstractJob ...; keyargs ...)
-
     [assign!(pm[pid], job; keyargs ...) for job in jobs]
 end
 
@@ -854,7 +853,6 @@ distribute_open!(pm::AbstractProcessManager, job::AbstractJob ...; not::Process 
 
 - See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`, `distribute!`, `Worker`, `ProcessManager`
 """
-
 function distribute_open!(pm::AbstractProcessManager, jobs::AbstractJob ...; not = Async, keyargs ...)
     open = filter(w::AbstractWorker -> ~(w.active), pm.workers)
     distribute!(pm, [w.pid for w in open], jobs ...; not = not; keyargs ...)
