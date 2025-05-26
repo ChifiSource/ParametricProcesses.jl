@@ -347,7 +347,9 @@ function close(w::Worker{<:Any})
 end
 
 function close(w::Worker{Async})
-    close(w.task)
+    if ~(isnothing(w.task))
+        close(w.task)
+    end
 end
 
 
@@ -355,16 +357,25 @@ end
 ```julia
 close(pm::AbstractProcessManager) -> ::ProcessManager
 ```
-Strips a process manager of all current workers (closes all workers.)
-```julia
-
-```
+Strips a process manager of all current workers (closes *and deletes* all workers.)
 ```julia
 
 ```
 """
 close(pm::AbstractProcessManager) = [delete!(pm, pid) for pid in worker_pids(pm)]; GC.gc(); nothing
 
+"""
+```julia
+close_workers!(pm::AbstractProcessManager, pids::Vector{Int64} = worker_pids(pm))  -> ::ProcessManager
+```
+Closes `pids` on `pm`. Note that this is different from `close(::AbstractProcessManager)`, which will call delete.
+```julia
+using ParametricProcesses
+
+pm = processes(5)
+close_workers!(pm, [2, 3])
+```
+"""
 close_workers!(pm::AbstractProcessManager, pids::Vector{Int64} = worker_pids(pm)) = begin
     for worker in 1:length(pids)
         close(pm.workers[worker])
@@ -536,21 +547,33 @@ ret = waitfor(pm, 2); println("worker 2 completed, it returned: ", ret[1])
 # worker 2 completed, it returned: 55
 ```
 """
-function waitfor(pm::ProcessManager, pids::Any ...)
+function waitfor(pm::ProcessManager, pids::Any ...; sync::Bool = true)
     workers = [pm[pid] for pid in pids]
-    @sync while true
-        next = findfirst(w -> w.active == true, workers)
-        if isnothing(next)
-            break
+    if sync
+        @sync while true
+            next = findfirst(w -> w.active == true, workers)
+            if isnothing(next)
+                break
+            else
+                yield()
+            end
         end
-        wait(workers[next].task)
-        workers[next].active = false
+        [pm[pid].ret for pid in pids]
+    else
+        @async while true
+            next = findfirst(w -> w.active == true, workers)
+            if isnothing(next)
+                break
+            else
+                yield()
+            end
+        end
+        [pm[pid].ret for pid in pids]
     end
-    [pm[pid].ret for pid in pids]
 end
 
-waitfor(f::Function, pm::ProcessManager, pids::Any ...) = begin
-    ret = waitfor(pm, pids ...)
+waitfor(f::Function, pm::ProcessManager, pids::Any ...; keys ...) = begin
+    ret = waitfor(pm, pids ...; keys ...)
     f(ret)
 end
 
@@ -855,11 +878,11 @@ distribute_open!(pm::AbstractProcessManager, job::AbstractJob ...; not::Process 
 """
 function distribute_open!(pm::AbstractProcessManager, jobs::AbstractJob ...; not = Async, keyargs ...)
     open = filter(w::AbstractWorker -> ~(w.active), pm.workers)
-    distribute!(pm, [w.pid for w in open], jobs ...; not = not; keyargs ...)
+    distribute!(pm, [w.pid for w in open], jobs ...; not = not, keyargs ...)
 end
 
 
 
 export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids, Workers, distribute_open!, assign_open!
-export Threaded, new_job, @everywhere, get_return!, waitfor, Async, RemoteChannel, @distributed, @spawnat
+export Threaded, new_job, @everywhere, get_return!, waitfor, Async, RemoteChannel, @distributed, @spawnat, close_workers!
 end # module
