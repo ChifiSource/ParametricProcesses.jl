@@ -7,7 +7,6 @@ Created in February, 2023 by
 `ParametricProcesses` provides a high-level parametric worker interface for managing different types of parallel computing 
 platforms. The results are process tracking and load/worker distribution for multi-threaded and asynchronous use-cases.
 With extensions, this management framework could be used further with other forms of parallel computing.
----
 ###### contents
  - `AbstractWorker`
  - `Process`
@@ -23,6 +22,7 @@ With extensions, this management framework could be used further with other form
  - `ProcessManager`
  - `close(pm::ProcessManager)`
  - `close(w::Worker)`
+ - `close_workers!`
  - `delete!(pm::ProcessManager, name::String)`
  - `delete!(pm::ProcessManager, pid::Int64)`
  - `push!(pm::ProcessManager, w::Worker{<:Any})`
@@ -44,23 +44,26 @@ import Base: show, getindex, push!, delete!, put!, take!, close
 using Distributed
 
 """
-### abstract type AbstractWorker
+```julia
+abstract type AbstractWorker
+```
 The `AbstractWorker` is a worker that holds  a parametric `Process` type, 
 an identifier, and finally task information such as whether the task is active or not.
 
 - See also: `Worker`, `processes`, `assign!`, `new_job`, `ProcessManager`
-##### consistencies
 - pid**::Int64**
 - active**::Bool**
 """
 abstract type AbstractWorker end
 
 """
-### abstract type Process
+```julia
+abstract type Process
+```
 A `Process` is a type only by name, and is used to denote the type of a `Worker`.
 
 - See also: `Worker`, `processes`, `Async`, `Threaded`, `assign!`, `assign_open!`
-##### consistencies
+
 - pid**::Int64**
 - active**::Bool**
 """
@@ -82,7 +85,7 @@ while creating or using a `Worker` with `assign!` or `create_workers`.
     this error is thrown when there are not enough threads to spawn 
     the number of threaded workers.
 ```julia
-- ProcessError(message::String, ptype::Process)
+ProcessError(message::String, ptype::Process)
 ```
 """
 mutable struct ProcessError <: Exception
@@ -91,37 +94,46 @@ mutable struct ProcessError <: Exception
 end
 
 """
-### abstract type WorkerProcess
-A `Process` is a type only by name, and is used to denote the type of a `Worker`.
+```julia
+abstract type WorkerProcess
+```
+A `Process` is a type only by name, and is used to denote the type of a `Worker`. 
+This is used with *parametric dispatch* to load different types of parallel processes. 
+`ParametricProcesses` implements `Async` and `Threaded`.
 
-- See also: `Worker`, `processes`, `new_job`, `Async`, `Threaded`
-##### consistencies
 - pid**::Int64**
 - active**::Bool**
+
+- See also: `Worker`, `processes`, `new_job`, `Async`, `Threaded`
 """
 abstract type WorkerProcess <: Process end
 
 """
-### abstract type Threaded
+```julia
+abstract type Threaded
+```
 A `Process` is a type only by name, and is used to denote the type of a `Worker`. `Threaded` is 
 used to denote a worker on its own thread, a `Worker` of type `Worker{Threaded}`.
 
-- See also: `Worker`, `processes`, `new_job`, `Async`, `Threaded`
-##### consistencies
 - pid**::Int64**
 - active**::Bool**
+
+- See also: `Worker`, `processes`, `new_job`, `Async`, `Threaded`
 """
 abstract type Threaded <: Process end
 
 """
-### abstract type Async
+```julia
+abstract type Async
+```
 A `Process` is a type only by name, and is used to denote the type of a `Worker`. `Async` workers run 
-on the same thread, able to run tasks on that thread only when it is required to run that task.
+on the same thread, able to run tasks on that thread only when it is required to run that task. Note that 
+you will need to add `yield` to your task to make it *yielding*.
 
-- See also: `Worker`, `processes`, `new_job`, `Threaded`
-##### consistencies
 - pid**::Int64**
 - active**::Bool**
+
+- See also: `Worker`, `processes`, `new_job`, `Threaded`
 """
 abstract type Async <: Process end
 abstract type AbstractJob end
@@ -142,8 +154,7 @@ the arguments for the `Function` to `new_job` (or this constructor), and then pr
 ```julia
 - ProcessJob(f::Function, args ...; keyargs ...)
 ```
----
-```example
+```julia
 # note this is `julia --threads >2`
 newprocs = processes(3)
 io = IOBuffer()
@@ -182,8 +193,7 @@ by providing a name and process identifier, or workers can be created using the 
 ```julia
 - Worker{T}(name::String, pid::Int64)
 ```
----
-```example
+```julia
 newworker = Worker{Async}("example", 500)
 
 jb = new_job() do
@@ -247,7 +257,7 @@ simplified through the `processes` `Function`, which will provide us with initia
 ```julia
 processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...)
 ```
-```example
+```julia
 myprocs = processes(5)
 asyncprocs = processes(2, Async, "first", "second")
 ```
@@ -258,7 +268,7 @@ asyncprocs = processes(2, Async, "first", "second")
 - ProcessManager(workers::Vector{<:AbstractWorker})
 ```
 ---
-```example
+```julia
 # threaded workers
 pm = processes(2)
 # asynchronous worker.
@@ -292,7 +302,7 @@ function show(io::IO, pm::AbstractProcessManager)
     [show(worker) for worker in pm.workers]
 end
 
-function getindex(pm::AbstractProcessManager, name::String)
+function getindex(pm::AbstractProcessManager, name::AbstractString)
     pos = findfirst(worker::Worker{<:Any} -> worker.name == name, pm.workers)
     if isnothing(pos)
         throw(KeyError(name))
@@ -300,7 +310,7 @@ function getindex(pm::AbstractProcessManager, name::String)
     pm.workers[pos]
 end
 
-function getindex(pm::ProcessManager, pid::Int64)
+function getindex(pm::AbstractProcessManager, pid::Integer)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
     if isnothing(pos)
         throw(KeyError(pid))
@@ -318,14 +328,19 @@ close(w::Worker{<:Any}) -> ::Nothing
 ```
 Closes a worker directly. For example, the `Worker{Threaded}` here will close 
 your process IDs. `async` will simply get rid of the task. This function is not 
-necessarily intended to be called directly, 
+necessarily intended to be called directly. Also take note of `delete!` -- this 
+function only *closes* the workers.
 ```julia
-
+close(w::Worker{<:Any})
+close(w::Worker{Async})
+close(w::Worker{Threaded})
 ```
----
-```example
-
+```julia
+using ParametricProcesses
+pm = processes(5)
+[close(w) for w in pm.workers] # (or `close_workers`) on `pm`.
 ```
+- See also: `close_workers!`, `processes`, `create_workers`
 """
 function close(w::Worker{<:Any})
 
@@ -344,8 +359,7 @@ Strips a process manager of all current workers (closes all workers.)
 ```julia
 
 ```
----
-```example
+```julia
 
 ```
 """
@@ -393,8 +407,7 @@ This function is used to create new workers with the process type `of`.
 create_workers(n::Int64, of::Type{Threaded})
 create_workers(n::Int64, of::Type{Async})
 ```
----
-```example
+```julia
 workers = create_workers(3, ParametricProcesses.Async)
 ```
 """
@@ -418,13 +431,12 @@ end
 """
 ```julia
 add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)
-````
+```
 Add workers adds workers to a `ProcessManager`. 
 The `ProcessManager` can be created with or without workers. `add_workers!` is a 
 quick way to add `Workers` of any `Process` type to an existing aggregation of 
 `Workers`.
----
-```example
+```julia
 pm = processes(2)
 # 2 workers, three total processes (including `Main`)
 add_workers!(pm, 2)
@@ -450,8 +462,7 @@ end
 processes(n::Int64, of::Type{<:Process} = Threaded, names::String ...) -> ::ProcessManager
 ```
 Creates `Workers` inside of a `ProcessManager` with the `Process` type `of`.
----
-```example
+```julia
 myprocs = processes(5)
 2 |Threaded process: 1 (inactive)
 3 |Threaded process: 2 (inactive)
@@ -479,8 +490,7 @@ worker_pids(pm::ProcessManager) -> ::Vector{Int64}
 ```
 Gives the pid of each `Worker` in a `ProcessManager`'s `Workers` in the 
 form of a `Vector{Int64}`.
----
-```example
+```julia
 pm = processes(3)
 
 worker_pids(pm)
@@ -509,8 +519,7 @@ Stalls the main thread process to wait for all pids provided to `pids`.
 Will return a `Vector{Any}` containing the completed returns for each `Worker`. Providing 
     no pids will `waitfor` all busy workers. Using `waitfor(f::Function, ...)` will run `f` 
     after `pids` are complete.
----
-```example
+```julia
 pm = processes(4)
 
 jb = new_job() do 
@@ -570,9 +579,7 @@ from each `Worker` without waiting for the process to stop. This means that the 
     following example, `get_return!` is essentially redundant, as we could simply call `waitfor` and anticipate a return. 
     However, we probably usually want to make sure a task is done before trying to get the return. This can be monitored with 
     the `Worker.active` field.
-
----
-```example
+```julia
 myprocs = processes(4)
 jb = new_job(+, 5, 5)
 assign!(myprocs, 2, jb)
@@ -586,13 +593,17 @@ function get_return!(pm::ProcessManager, pids::Any ...)
     [pm[pid].ret for pid in pids]
 end
 
+put!(w::Worker{<:Any}, vals ...) = begin
+    channel = RemoteChannel(w.pid)
+    put!(channel, vals ...)
+end
+
 """
 ```julia
 put!(pm::ProcessManager, pids::Vector{Int64}, vals ...) -> ::Nothing
 ```
 Puts different objects directly into a `Worker`, defines them on that thread's `Main`.
----
-```example
+```julia
 myprocs = processes(4)
 message = "hello"
 put!(myprocs, 2, message)
@@ -627,7 +638,7 @@ end
 
 """
 ```julia
-assign!
+assign!(...; sync::Bool = false)
 ```
 `assign!` is used to distribute tasks to workers directly. This 
 culminates in two forms; `assign!` is used to assign a worker directly to 
@@ -645,7 +656,7 @@ assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
 ```
 - See also: `processes`, `distribute!`, `waitfor`, `put!`, `new_job`, `assign_open!`
 ---
-```example
+```julia
 procs = processes(5)
 
 jb1 = new_job(println, "hello world!")
@@ -729,22 +740,24 @@ function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJo
     assigned_worker.pid
 end
 
-function assign!(f::Function, pm::ProcessManager, pid::Any, jobs::AbstractJob ...; keyargs ...)
+function assign!(f::Function, pm::AbstractProcessManager, pid::Any, jobs::AbstractJob ...; keyargs ...)
    [assign!(f, pm[pid], job; keyargs ...) for job in jobs]
 end
 
-function assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...; keyargs ...)
+function assign!(pm::AbstractProcessManager, pid::Any, jobs::AbstractJob ...; keyargs ...)
+
     [assign!(pm[pid], job; keyargs ...) for job in jobs]
 end
 
 """
 ```julia
-assign_open!(pm::ProcessManager, job::AbstractJob ...; ; not::Process = Async) -> ::Int64
+assign_open!(pm::ProcessManager, job::AbstractJob ...; ; not::Process = Async, sync::Bool = false) -> ::Int64
 ```
 Assigns a single `AbstractJob` to an open worker. If no open workers are available, `distribute!` will be called.
 - See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`, `distribute!`
----
-```example
+```julia
+using ParametricProcesses
+
 procs = processes(5)
 
 jb1 = new_job(println, "hello world!")
@@ -772,7 +785,7 @@ end
 
 """
 ```julia
-distribute!(pm::ProcessManager, ..., jobs::AbstractJob ...; not::Process = Async) -> ::Vector{Int64}
+distribute!(pm::ProcessManager, ..., jobs::AbstractJob ...; not::Process = Async, sync::Bool = false) -> ::Vector{Int64}
 ```
 The `distribute!` Function will distribute jobs amongst all workers or amongst 
 the provided workers.
@@ -785,8 +798,9 @@ distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ..
 distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...)
 ```
 - See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`, `distribute_open!`
----
-```example
+```julia
+using ParametricProcesses
+
 procs = processes(5)
 
 jb1 = new_job(println, "hello world!")
@@ -806,7 +820,7 @@ distribute!(pm, [1, 2], jb2, jb3, jb3, jb2, jb1)
 """
 function distribute! end
 
-function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...; not = Async, sync::Bool = false)
+function distribute!(pm::AbstractProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...; not = Async, sync::Bool = false)
     ws = filter(w -> typeof(w) != Worker{not}, [pm[pid] for pid in worker_pids])
     at::Int64 = 1
     stop::Int64 = length(ws) + 1
@@ -824,32 +838,29 @@ function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::Abstr
     worker_pids::Vector{Int64}
 end
 
-distribute!(pm::ProcessManager, jobs::AbstractJob ...; not = Async) = distribute!(pm, [w.pid for w in pm.workers], jobs ...; not = not)
+distribute!(pm::AbstractProcessManager, jobs::AbstractJob ...; not = Async) = distribute!(pm, [w.pid for w in pm.workers], jobs ...; not = not)
+
+function distribute!(pm::AbstractProcessManager, percentage::Float64, jobs::AbstractJob ...; not = Async, keyargs ...)
+    total_workers = length(pm.workers)
+    num_workers = round(Int, percentage * total_workers)
+    ws = [pm.workers[rand(1:total_workers)] for e in num_workers]
+    distribute!(pm, (w.pid for w in ws) ...; not = not, keyargs ...)
+end
 
 """
 ```julia
-distribute_open!(pm::ProcessManager, job::AbstractJob ...; not::Process = Async) -> ::Vector{Int64}
+distribute_open!(pm::AbstractProcessManager, job::AbstractJob ...; not::Process = Async, sync::Bool = false) -> ::Vector{Int64}
 ```
 
 - See also: `processes`, `assign!`, `new_job`, `waitfor`, `put!`, `distribute!`, `Worker`, `ProcessManager`
----
-```example
-procs = processes(5)
-
-
-```
 """
-function distribute_open!(pm::ProcessManager, jobs::AbstractJob ...; not = Async, keyargs ...)
+
+function distribute_open!(pm::AbstractProcessManager, jobs::AbstractJob ...; not = Async, keyargs ...)
     open = filter(w::AbstractWorker -> ~(w.active), pm.workers)
     distribute!(pm, [w.pid for w in open], jobs ...; not = not; keyargs ...)
 end
 
-function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...; not = Async)
-    total_workers = length(pm.workers)
-    num_workers = round(Int, percentage * total_workers)
-    ws = [pm.workers[rand(1:total_workers)] for e in num_workers]
-    distribute!(pm, (w.pid for w in ws) ...; not = not)
-end
+
 
 export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids, Workers, distribute_open!, assign_open!
 export Threaded, new_job, @everywhere, get_return!, waitfor, Async, RemoteChannel, @distributed, @spawnat
