@@ -57,6 +57,7 @@ end
     end
     assign!(procs, 4, jb)
     @test procs[4].active == true
+    sleep(1)
     ret = waitfor(procs, 4)
     @test procs[4].active == false
     @test ret[1] == 2005
@@ -65,6 +66,7 @@ end
         5
     end
     pid = distribute!(procs, job)
+    sleep(1)
     waitfor(procs, pid ...) do ret
         @test ret[1] == 5
     end
@@ -73,7 +75,7 @@ end
     job = new_job() do 
         val * "world"
     end
-    assign!(procs, pid, job)
+    assign!(procs, pid, job, sync = true)
     hellw = waitfor(procs, pid) 
     @test hellw[1] == "hello world"
 end
