@@ -332,7 +332,7 @@ function close(w::Worker{<:Any})
 end
 
 function close(w::Worker{Async})
-    w.task
+    close(w.task)
 end
 
 
@@ -350,6 +350,12 @@ Strips a process manager of all current workers (closes all workers.)
 ```
 """
 close(pm::AbstractProcessManager) = [delete!(pm, pid) for pid in worker_pids(pm)]; GC.gc(); nothing
+
+close_workers!(pm::AbstractProcessManager, pids::Vector{Int64} = worker_pids(pm)) = begin
+    for worker in 1:length(pids)
+        close(pm.workers[worker])
+    end
+end
 
 function delete!(pm::AbstractProcessManager, pid::Int64)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
@@ -483,10 +489,10 @@ worker_pids(pm)
 """
 worker_pids(pm::AbstractProcessManager) = [w.pid for w in pm.workers]
 
-worker_pids(pm::AbstractProcessManager, type::Type{<:Process}) = begin
+worker_pids(pm::AbstractProcessManager, type::Type{<:Process} ...) = begin
     pids = Vector{Int64}()
     for worker in pm.workers
-        if typeof(worker).parameters[1] == type
+        if typeof(worker).parameters[1] in type
             push!(pids, worker.pid)
         end
     end
@@ -523,7 +529,7 @@ ret = waitfor(pm, 2); println("worker 2 completed, it returned: ", ret[1])
 """
 function waitfor(pm::ProcessManager, pids::Any ...)
     workers = [pm[pid] for pid in pids]
-    while true
+    @sync while true
         next = findfirst(w -> w.active == true, workers)
         if isnothing(next)
             break
@@ -614,6 +620,11 @@ function put!(pm::AbstractProcessManager, vals ...)
     end
 end
 
+put!(pid::Integer, pm::AbstractProcessManager, vals ...) = begin
+    channel = RemoteChannel(pid)
+    put!(channel, vals ...)
+end
+
 """
 ```julia
 assign!
@@ -662,12 +673,14 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob; sync::Bool
         assigned_worker.active = true
         if sync
             @sync begin
+                yield()
                 wait(assigned_task)
                 assigned_worker.ret = fetch(assigned_task)
                 assigned_worker.active = false
             end
         else
             @async begin
+                yield()
                 wait(assigned_task)
                 assigned_worker.ret = fetch(assigned_task)
                 assigned_worker.active = false
@@ -696,7 +709,7 @@ function assign!(assigned_worker::Worker{Async}, job::AbstractJob; sync::Bool = 
     end
 end
 
-function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJob)
+function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJob; kargs ...)
     if ~(assigned_worker.active)
         assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
         assigned_worker.task = assigned_task
@@ -711,17 +724,17 @@ function assign!(f::Function, assigned_worker::Worker{Threaded}, job::AbstractJo
     @async begin
         wait(assigned_worker.task)
         sleep(1)
-        assign!(f, assigned_worker, job)
+        assign!(f, assigned_worker, job; kargs ...)
     end
     assigned_worker.pid
 end
 
-function assign!(f::Function, pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
-   [assign!(f, pm[pid], job) for job in jobs]
+function assign!(f::Function, pm::ProcessManager, pid::Any, jobs::AbstractJob ...; keyargs ...)
+   [assign!(f, pm[pid], job; keyargs ...) for job in jobs]
 end
 
-function assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...)
-    [assign!(pm[pid], job) for job in jobs]
+function assign!(pm::ProcessManager, pid::Any, jobs::AbstractJob ...; keyargs ...)
+    [assign!(pm[pid], job; keyargs ...) for job in jobs]
 end
 
 """
@@ -793,13 +806,13 @@ distribute!(pm, [1, 2], jb2, jb3, jb3, jb2, jb1)
 """
 function distribute! end
 
-function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...; not = Async)
+function distribute!(pm::ProcessManager, worker_pids::Vector{Int64}, jobs::AbstractJob ...; not = Async, sync::Bool = false)
     ws = filter(w -> typeof(w) != Worker{not}, [pm[pid] for pid in worker_pids])
     at::Int64 = 1
     stop::Int64 = length(ws) + 1
     [begin
         worker = ws[at]
-        assign!(worker, job)
+        assign!(worker, job, sync = sync)
         at += 1
         if at == stop
             at = 1
@@ -826,9 +839,9 @@ procs = processes(5)
 
 ```
 """
-function distribute_open!(pm::ProcessManager, jobs::AbstractJob ...; not = Async)
+function distribute_open!(pm::ProcessManager, jobs::AbstractJob ...; not = Async, keyargs ...)
     open = filter(w::AbstractWorker -> ~(w.active), pm.workers)
-    distribute!(pm, [w.pid for w in open], jobs ...; not = not)
+    distribute!(pm, [w.pid for w in open], jobs ...; not = not; keyargs ...)
 end
 
 function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob ...; not = Async)
