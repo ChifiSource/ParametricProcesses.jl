@@ -331,6 +331,11 @@ function close(w::Worker{<:Any})
 
 end
 
+function close(w::Worker{Async})
+    w.task
+end
+
+
 """
 ```julia
 close(pm::ProcessManager) -> ::ProcessManager
@@ -344,24 +349,24 @@ Strips a process manager of all current workers (closes all workers.)
 
 ```
 """
-close(pm::ProcessManager) = [delete!(pm, pid) for pid in worker_pids(pm)]; GC.gc(); nothing
+close(pm::AbstractProcessManager) = [delete!(pm, pid) for pid in worker_pids(pm)]; GC.gc(); nothing
 
-function delete!(pm::ProcessManager, pid::Int64)
+function delete!(pm::AbstractProcessManager, pid::Int64)
     pos = findfirst(worker::Worker{<:Any} -> worker.pid == pid, pm.workers)
     if isnothing(pos)
         throw(KeyError(pid))
     end
     close(pm.workers[pos])
     deleteat!(pm.workers, pos)
-    pm::ProcessManager
+    pm::AbstractProcessManager
 end
 
-push!(pm::ProcessManager, w::Worker{<:Any}) = begin
+push!(pm::AbstractProcessManager, w::Worker{<:Any}) = begin
     push!(pm.workers, w)
-    pm::ProcessManager
+    pm::AbstractProcessManager
 end
 
-function delete!(pm::ProcessManager, name::String)
+function delete!(pm::AbstractProcessManager, name::String)
     pos = findfirst(worker::Worker{<:Any} -> worker.name == name, pm.workers)
     if isnothing(pos)
         throw(KeyError(name))
@@ -420,7 +425,7 @@ add_workers!(pm, 2)
 # now 4 workers, process id's 2-6
 ```
 """
-function add_workers!(pm::ProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)
+function add_workers!(pm::AbstractProcessManager, n::Int64, of::Type{<:Process} = Threaded, names::String ...)
     workers = Vector{Worker{<:Any}}()
     name_n = length(names)
     if name_n == 0
@@ -476,9 +481,9 @@ worker_pids(pm)
 [2, 3, 4]
 ```
 """
-worker_pids(pm::ProcessManager) = [w.pid for w in pm.workers]
+worker_pids(pm::AbstractProcessManager) = [w.pid for w in pm.workers]
 
-worker_pids(pm::ProcessManager, type::Type{<:Process}) = begin
+worker_pids(pm::AbstractProcessManager, type::Type{<:Process}) = begin
     pids = Vector{Int64}()
     for worker in pm.workers
         if typeof(worker).parameters[1] == type
@@ -594,14 +599,14 @@ assign!(myprocs, 2, jb)
 From worker 2:	hello
 ```
 """
-function put!(pm::ProcessManager, pids::Vector{Int64}, vals ...)
+function put!(pm::AbstractProcessManager, pids::Vector{Int64}, vals ...)
     for pid in pids
         channel = RemoteChannel(pid)
         put!(channel, vals ...)
     end
 end
 
-function put!(pm::ProcessManager, vals ...)
+function put!(pm::AbstractProcessManager, vals ...)
     for w in pm.workers
         pid = w.pid
         channel = RemoteChannel(pid)
@@ -646,15 +651,27 @@ assign!(procs, 2, jb2)
 """
 function assign! end
 
-function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
+function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob; sync::Bool = false)
     if ~(assigned_worker.active)
-        assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
+        if sync
+            @sync assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
+        else
+            assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
+        end
         assigned_worker.task = assigned_task
         assigned_worker.active = true
-        @sync begin
-            wait(assigned_task)
-            assigned_worker.ret = fetch(assigned_task)
-            assigned_worker.active = false
+        if sync
+            @sync begin
+                wait(assigned_task)
+                assigned_worker.ret = fetch(assigned_task)
+                assigned_worker.active = false
+            end
+        else
+            @async begin
+                wait(assigned_task)
+                assigned_worker.ret = fetch(assigned_task)
+                assigned_worker.active = false
+            end
         end
         return assigned_worker.pid
     end
@@ -666,8 +683,13 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob)
     assigned_worker.pid
 end
 
-function assign!(assigned_worker::Worker{Async}, job::AbstractJob)
+function assign!(assigned_worker::Worker{Async}, job::AbstractJob; sync::Bool = false)
     assigned_worker.active = true
+    if sync
+        job.f(job.args ...; job.keyargs ...)
+        assigned_worker.active = false
+        return
+    end
     assigned_worker.task = @async begin
         job.f(job.args ...; job.keyargs ...)
         assigned_worker.active = false
@@ -722,13 +744,14 @@ jb3 = new_job() do
 end
 ```
 """
-function assign_open!(pm::ProcessManager, job::AbstractJob ...; not = Async)
+function assign_open!(pm::AbstractProcessManager, job::AbstractJob ...; not::Type{<:Process} = Async, 
+    sync::Bool = false)
     ws = pm.workers
     ws = filter(w -> typeof(w) != Worker{not}, ws)
     open = findfirst(w -> ~(w.active), ws)
     if ~(isnothing(open))
         w = ws[open]
-        [assign!(w, j) for j in job]
+        [assign!(w, j, sync = sync) for j in job]
         return([w.pid])
     end
     distribute!(pm, job ..., not = not)
@@ -816,5 +839,5 @@ function distribute!(pm::ProcessManager, percentage::Float64, jobs::AbstractJob 
 end
 
 export processes, add_workers!, assign!, distribute!, Worker, ProcessManager, worker_pids, Workers, distribute_open!, assign_open!
-export Threaded, new_job, @everywhere, get_return!, waitfor, Async, RemoteChannel, @distributed
+export Threaded, new_job, @everywhere, get_return!, waitfor, Async, RemoteChannel, @distributed, @spawnat
 end # module
