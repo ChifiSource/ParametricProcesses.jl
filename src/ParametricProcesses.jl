@@ -572,6 +572,8 @@ function waitfor(pm::ProcessManager, pids::Any ...; sync::Bool = true)
     end
 end
 
+waitfor(pm::ProcessManager, pids::Vector{<:Any}; keys ...) = waitfor(pm, pids ...; keys ...)
+
 waitfor(f::Function, pm::ProcessManager, pids::Any ...; keys ...) = begin
     ret = waitfor(pm, pids ...; keys ...)
     f(ret)
@@ -705,32 +707,27 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob; sync::Bool
         end
         assigned_worker.task = assigned_task
         assigned_worker.active = true
-        if sync
-            @sync begin
-                yield()
-                wait(assigned_task)
-                assigned_worker.ret = fetch(assigned_task)
-                assigned_worker.active = false
-            end
-        else
+        if ~(sync)
             @async begin
-                yield()
                 wait(assigned_task)
                 assigned_worker.ret = fetch(assigned_task)
                 assigned_worker.active = false
             end
+            return assigned_worker.pid
         end
-        return assigned_worker.pid
+        begin
+            wait(assigned_task)
+            assigned_worker.ret = fetch(assigned_task)
+            assigned_worker.active = false
+        end
+        return(assigned_worker.pid)
+    else
+        throw("assignment of active worker ($(assigned_worker.pid))")
     end
-    @async begin
-        wait(assigned_worker.task)
-        sleep(1)
-        assign!(assigned_worker, job)
-    end
-    assigned_worker.pid
 end
 
 function assign!(assigned_worker::Worker{Async}, job::AbstractJob; sync::Bool = false)
+    @info "assigned async worker"
     assigned_worker.active = true
     if sync
         job.f(job.args ...; job.keyargs ...)
