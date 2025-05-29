@@ -1,7 +1,7 @@
 name = "ParametricProcesses"
 uuid = "9ce9415f-ecd2-4b63-a3f6-984ce63e76ce"
 authors = ["emmac <emmacboudreau@gmail.com>"]
-version = "0.1.2"
+version = "0.1.3"
 
 [deps]
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
