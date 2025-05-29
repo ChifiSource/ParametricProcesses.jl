@@ -698,7 +698,7 @@ assign!(procs, 2, jb2)
 """
 function assign! end
 
-function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob; sync::Bool = false)
+function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob; sync::Bool = false, main_fallback::Bool = false)
     if ~(assigned_worker.active)
         if sync
             @sync assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
@@ -722,7 +722,21 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob; sync::Bool
         end
         return(assigned_worker.pid)
     else
-        throw("assignment of active worker ($(assigned_worker.pid))")
+        if main_fallback
+            return(1, job.f(job.args ...; job.kwargs ...))
+        end
+        if async
+            @async begin
+                wait(assigned_worker.task)
+                assign!(f, assigned_worker, job; kargs ...)
+            end
+            return assigned_worker.pid
+        else
+            begin
+                wait(assigned_worker.task)
+                assign!(f, assigned_worker, job; kargs ...)
+            end
+        end
     end
 end
 
