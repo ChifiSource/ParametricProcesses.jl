@@ -219,7 +219,8 @@ ids = distribute!(procs, worker_pids(procs), jbs ...)
 mret = vcat(waitfor(procs, ids ...) ...)
 @test length(ret) == length(mret)
 ```
-In the above example, `distribute!` is used to perform the tasks on 5 threads instead of one. While this does not necessarily offer a huge benefit to performance as parsing CSS is pretty simple and it is more CPU work to serialize the data for the thread, this examples does show pretty well how to easily replicate tasks across several workers.
+- In the above example, `distribute!` is used to perform the tasks on 5 threads instead of one. While this does not necessarily offer a huge benefit to performance as parsing CSS is pretty simple and it is more CPU work to serialize the data for the thread, this examples does show pretty well how to easily replicate tasks across several workers.
+
  ---
 ### contributing
 There are several ways to contribute to the `ParametricProcesses` package.

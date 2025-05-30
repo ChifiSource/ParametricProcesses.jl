@@ -572,6 +572,8 @@ function waitfor(pm::ProcessManager, pids::Any ...; sync::Bool = true)
     end
 end
 
+waitfor(pm::ProcessManager, pids::Vector{<:Any}; keys ...) = waitfor(pm, pids ...; keys ...)
+
 waitfor(f::Function, pm::ProcessManager, pids::Any ...; keys ...) = begin
     ret = waitfor(pm, pids ...; keys ...)
     f(ret)
@@ -696,7 +698,7 @@ assign!(procs, 2, jb2)
 """
 function assign! end
 
-function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob; sync::Bool = false)
+function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob; sync::Bool = false, main_fallback::Bool = false)
     if ~(assigned_worker.active)
         if sync
             @sync assigned_task = remotecall(job.f, assigned_worker.pid, job.args ...; job.kwargs ...)
@@ -705,32 +707,41 @@ function assign!(assigned_worker::Worker{Threaded}, job::AbstractJob; sync::Bool
         end
         assigned_worker.task = assigned_task
         assigned_worker.active = true
-        if sync
-            @sync begin
-                yield()
+        if ~(sync)
+            @async begin
                 wait(assigned_task)
                 assigned_worker.ret = fetch(assigned_task)
                 assigned_worker.active = false
             end
-        else
+            return assigned_worker.pid
+        end
+        begin
+            wait(assigned_task)
+            assigned_worker.ret = fetch(assigned_task)
+            assigned_worker.active = false
+        end
+        return(assigned_worker.pid)
+    else
+        if main_fallback
+            return(1, job.f(job.args ...; job.kwargs ...))
+        end
+        if async
             @async begin
-                yield()
-                wait(assigned_task)
-                assigned_worker.ret = fetch(assigned_task)
-                assigned_worker.active = false
+                wait(assigned_worker.task)
+                assign!(f, assigned_worker, job; kargs ...)
+            end
+            return assigned_worker.pid
+        else
+            begin
+                wait(assigned_worker.task)
+                assign!(f, assigned_worker, job; kargs ...)
             end
         end
-        return assigned_worker.pid
     end
-    @async begin
-        wait(assigned_worker.task)
-        sleep(1)
-        assign!(assigned_worker, job)
-    end
-    assigned_worker.pid
 end
 
 function assign!(assigned_worker::Worker{Async}, job::AbstractJob; sync::Bool = false)
+    @info "assigned async worker"
     assigned_worker.active = true
     if sync
         job.f(job.args ...; job.keyargs ...)
